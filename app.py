@@ -5,7 +5,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import requests, time, os, shutil
+import requests, time, os, shutil, threading
 
 # Carrega as variáveis do arquivo .env
 load_dotenv()
@@ -105,7 +105,6 @@ def fechar_modal(driver):
     except Exception:
         print("Nenhum modal aberto.")
 
-""" Painel de Atividades > Exportar Status"""
 def exportAtividadesStatus(driver):
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
@@ -118,7 +117,6 @@ def exportAtividadesStatus(driver):
     clicar_elemento(driver, '//*[contains(@id, "btnPesquisar")]')
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
 
-""" Painel de Atividades > Exportar Atividades"""
 def exportAtividades(driver):
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
@@ -174,7 +172,6 @@ def login(driver):
     
     print("Login realizado com sucesso!")
 
-
 def logout(driver):
     btn_logout_xpath = "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]"
     option_logout_xpath = "/html/body/vaadin-menu-bar-overlay/vaadin-menu-bar-list-box/vaadin-menu-bar-item[4]"
@@ -222,39 +219,46 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado para mover: {original}")
 
-# Execução principal
-driver = iniciar_driver()
-try:
-    data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"Iniciando download de arquivos em {data_atual}")
+""" Execução principal """
+def executar_rotina():
+    while True:
+        driver = iniciar_driver()
+        try:
+            data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"Iniciando download de arquivos em {data_atual}")
 
-    login(driver)
-    exportAtividadesStatus(driver)
-    logout(driver)
-    driver.refresh()
-    # time.sleep(5)
-    
-    # login(driver)
-    # exportAtividades(driver)
-    # logout(driver)
-    # driver.refresh()
-    # time.sleep(5)
-    
-    # login(driver)
-    # exportProducao(driver)
-    # logout(driver)
-    # time.sleep(5)
+            login(driver)
+            exportAtividadesStatus(driver)
+            logout(driver)
+            driver.refresh()
+            time.sleep(5)
+            
+            login(driver)
+            exportAtividades(driver)
+            logout(driver)
+            driver.refresh()
+            time.sleep(5)
+            
+            login(driver)
+            exportProducao(driver)
+            logout(driver)
+            time.sleep(5)
 
-    # dirOrigem = "C:/Users/Dev/Downloads"
-    # dirDestino = "C:/Users/Dev/Downloads/baixados"
-    # subDiretorio = "movidos"
-    # nomeArquivo1 = "Exportacao Atividade.xlsx"
-    # nomeArquivo2 = "Exportacao Status.xlsx"
-    # nomeArquivo3 = "ExportacaoProducao.xlsx"
+            dirOrigem = "C:/Users/Dev/Downloads"
+            dirDestino = "C:/Users/Dev/Downloads/baixados"
+            subDiretorio = "movidos"
+            nomeArquivo1 = "Exportacao Atividade.xlsx"
+            nomeArquivo2 = "Exportacao Status.xlsx"
+            nomeArquivo3 = "ExportacaoProducao.xlsx"
 
-    # mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
-finally:
-    data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"Finalizado em {data_atual}")
-    # driver.quit()
-    # time.sleep(1800)
+            mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
+        finally:
+            data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"Finalizado em {data_atual}")
+            driver.quit()
+        
+        print("Aguardando 30 minutos para a próxima execução...")
+        time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)
+
+""" Iniciar a execução em uma thread """
+threading.Thread(target=executar_rotina, daemon=True).start()
