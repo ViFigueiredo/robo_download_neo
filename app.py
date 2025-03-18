@@ -153,10 +153,27 @@ def login(driver):
     inserir_texto(driver, '//*[contains(@id, "input-vaadin-text-field-")]', username)
     inserir_texto(driver, '//*[contains(@id, "input-vaadin-password-field-")]', password)
     
-    otp = gerar_otp()
-    clicar_elemento(driver, '//*[contains(@id, "input-vaadin-radio-button-")]')
-    inserir_texto(driver, '//vaadin-text-field//input[contains(@id, "input-vaadin-text-field-21")]', otp)
-    clicar_elemento(driver, '//*[contains(@id, "btnLogar")]')
+    while True:
+        otp = gerar_otp()
+        clicar_elemento(driver, '//*[contains(@id, "input-vaadin-radio-button-")]')
+        inserir_texto(driver, '//vaadin-text-field//input[contains(@id, "input-vaadin-text-field-21")]', otp)
+        clicar_elemento(driver, '//*[contains(@id, "btnLogar")]')
+        
+        # Aguarda um curto período para a mensagem de erro aparecer (se houver)
+        time.sleep(2) 
+        
+        # Verifica se a mensagem de erro está presente
+        try:
+            mensagem = driver.find_element(By.XPATH, '/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/div/span/center').text
+            
+            if mensagem in ["Usuário não encontrado", "Código autenticador inválido", "Usuário inexistente ou senha inválida"]:
+                print("Erro detectado, tentando novamente...")
+                continue  # Repete o processo de OTP
+        except:
+            break  # Sai do loop se a mensagem de erro não for encontrada
+    
+    print("Login realizado com sucesso!")
+
 
 def logout(driver):
     btn_logout_xpath = "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]"
