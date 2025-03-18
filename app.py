@@ -11,9 +11,9 @@ import requests, time, os, shutil
 load_dotenv()
 
 # Acessando as variáveis
-url = os.getenv("URL")
-username = os.getenv("USERNAME")
-password = os.getenv("PASSWORD")
+url = os.getenv("SYS_URL")
+username = os.getenv("SYS_USERNAME")
+password = os.getenv("SYS_PASSWORD")
 
 def iniciar_driver():
     """Inicializa o WebDriver do Firefox."""
@@ -23,7 +23,7 @@ def acessar_pagina(driver, url):
     """Acessa a URL especificada."""
     driver.get(url)
 
-def esperar_elemento(driver, xpath, tempo=10):
+def esperar_elemento(driver, xpath, tempo=300):
     """Aguarda um elemento estar presente na página."""
     return WebDriverWait(driver, tempo).until(
         EC.presence_of_element_located((By.XPATH, xpath))
@@ -232,29 +232,29 @@ try:
     exportAtividadesStatus(driver)
     logout(driver)
     driver.refresh()
-    time.sleep(5)
+    # time.sleep(5)
     
-    login(driver)
-    exportAtividades(driver)
-    logout(driver)
-    driver.refresh()
-    time.sleep(5)
+    # login(driver)
+    # exportAtividades(driver)
+    # logout(driver)
+    # driver.refresh()
+    # time.sleep(5)
     
-    login(driver)
-    exportProducao(driver)
-    logout(driver)
-    time.sleep(5)
+    # login(driver)
+    # exportProducao(driver)
+    # logout(driver)
+    # time.sleep(5)
 
-    dirOrigem = "C:/Users/Dev/Downloads"
-    dirDestino = "C:/Users/Dev/Downloads/baixados"
-    subDiretorio = "movidos"
-    nomeArquivo1 = "Exportacao Atividade.xlsx"
-    nomeArquivo2 = "Exportacao Status.xlsx"
-    nomeArquivo3 = "ExportacaoProducao.xlsx"
+    # dirOrigem = "C:/Users/Dev/Downloads"
+    # dirDestino = "C:/Users/Dev/Downloads/baixados"
+    # subDiretorio = "movidos"
+    # nomeArquivo1 = "Exportacao Atividade.xlsx"
+    # nomeArquivo2 = "Exportacao Status.xlsx"
+    # nomeArquivo3 = "ExportacaoProducao.xlsx"
 
-    mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
+    # mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
 finally:
     data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"Finalizado em {data_atual}")
-    driver.quit()
+    # driver.quit()
     # time.sleep(1800)
