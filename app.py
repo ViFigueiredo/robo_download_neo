@@ -1,19 +1,10 @@
-import requests
-import time
-import os
-import shutil
-import threading
+import requests, time, os, shutil, threading
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.edge.service import Service as EdgeService
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.firefox.options import Options
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -25,21 +16,12 @@ url = os.getenv("SYS_URL")
 username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 
-def iniciar_driver(navegador='edge'):
+
+def iniciar_driver():
     print("Iniciando driver do navegador...")
-    if navegador.lower() == 'chrome':
-        options = ChromeOptions()
-        # options.add_argument("--headless")  # Descomente para rodar em modo headless
-        driver = webdriver.Chrome(service=ChromeService(), options=options)
-    elif navegador.lower() == 'firefox':
-        options = FirefoxOptions()
-        # options.add_argument("--headless")  # Descomente para rodar em modo headless
-        driver = webdriver.Firefox(service=FirefoxService(), options=options)
-    else:  # Padrão para Edge
-        options = EdgeOptions()
-        # options.add_argument("--headless")  # Descomente para rodar em modo headless
-        driver = webdriver.Edge(service=EdgeService(), options=options)
-    
+    options = Options()
+    options.add_argument("--headless")
+    driver = webdriver.Firefox(options=options)
     return driver
 
 def acessar_pagina(driver, url):
@@ -47,11 +29,13 @@ def acessar_pagina(driver, url):
     print(f"Acessando {url}")
 
 def esperar_elemento(driver, xpath, tempo=300):
+    # print("Elemento em espera...")
     return WebDriverWait(driver, tempo).until(
         EC.presence_of_element_located((By.XPATH, xpath))
     )
 
 def inserir_texto(driver, xpath, texto):
+    # print("Inserindo texto...")
     esperar_elemento(driver, xpath)
     elemento = driver.find_element(By.XPATH, xpath)
     elemento.click()
@@ -59,6 +43,7 @@ def inserir_texto(driver, xpath, texto):
     elemento.send_keys(texto)
 
 def clicar_elemento(driver, xpath):
+    # print(f"Clicando no elemento...")
     driver.find_element(By.XPATH, xpath).click()
 
 def gerar_otp():
@@ -82,6 +67,7 @@ def selecionar_data(driver, xpath, data):
     driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
 
 def selecionar_texto(driver, xpath, text):
+    # print("Selecionando textos...")
     elemento = esperar_elemento(driver, xpath)
     elemento.click()
     elemento.clear()
@@ -105,7 +91,7 @@ def realizar_download_atividades(driver, button_xpath):
     clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
     clicar_elemento(driver, "//vaadin-button[text()='Fechar']")
     fechar_modal(driver)
-    print("Atividades baixadas com sucesso.")
+    print("Atividades baixadas com sucesso sucesso.")
 
 def realizar_download_producao(driver):
     print("Realizando download de produção...")
@@ -116,11 +102,13 @@ def realizar_download_producao(driver):
     print("Produção baixado com sucesso.")
 
 def fechar_modal(driver):
+    # print("Fechando modal...")
     try:
         overlay = driver.find_element(By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")
         if overlay.is_displayed():
             driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
             WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")))
+            # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
 
@@ -231,6 +219,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         if os.path.isfile(caminho_item):
             shutil.move(caminho_item, os.path.join(caminho_subdiretorio, item))
     
+    # Mover os novos arquivos para o diretório de destino antes de renomear
     for arquivo in arquivos:
         caminho_origem = os.path.join(diretorio_origem, arquivo)
         caminho_destino = os.path.join(diretorio_destino, arquivo)
@@ -239,6 +228,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado para mover: {arquivo}")
     
+    # Renomear apenas os arquivos dentro do subdiretório
     arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio)
     for original, novo_nome in arquivos_renomeados.items():
         caminho_origem = os.path.join(caminho_subdiretorio, original)
@@ -248,7 +238,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado para renomear: {original}")
 
-def executar_rotina(navegador='edge'):
+def executar_rotina():
     while True:
         driver = iniciar_driver(navegador)
         try:
@@ -286,10 +276,7 @@ def executar_rotina(navegador='edge'):
             driver.quit()
 
         print("Aguardando 30 minutos para a próxima execução...")
-        print("   ")
-        print("   ")
-        time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)       
+        time.sleep(5)  # Aguarda 30 minutos (1800 segundos)
 
-# Inicie a rotina com o navegador desejado
-navegador_desejado = 'chrome'  # 'chrome' ou 'firefox' ou 'edge'
-threading.Thread(target=executar_rotina, args=(navegador_desejado,), daemon=False).start()
+threading.Thread(target=executar_rotina, daemon=False).start()
+# executar_rotina()
