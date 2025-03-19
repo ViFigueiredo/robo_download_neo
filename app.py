@@ -1,11 +1,12 @@
+import requests, time, os, shutil, threading
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.firefox.options import Options
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import requests, time, os, shutil, threading
 
 # Carrega as variáveis do arquivo .env
 load_dotenv()
@@ -15,22 +16,26 @@ url = os.getenv("SYS_URL")
 username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 
+
 def iniciar_driver():
-    """Inicializa o WebDriver do Firefox."""
-    return webdriver.Firefox()
+    print("Iniciando driver do navegador...")
+    options = Options()
+    options.add_argument("--headless")
+    driver = webdriver.Firefox(options=options)
+    return driver
 
 def acessar_pagina(driver, url):
-    """Acessa a URL especificada."""
     driver.get(url)
+    print(f"Acessando {url}")
 
 def esperar_elemento(driver, xpath, tempo=300):
-    """Aguarda um elemento estar presente na página."""
+    # print("Elemento em espera...")
     return WebDriverWait(driver, tempo).until(
         EC.presence_of_element_located((By.XPATH, xpath))
     )
 
 def inserir_texto(driver, xpath, texto):
-    """Insere um texto em um campo de input identificado pelo XPath."""
+    # print("Inserindo texto...")
     esperar_elemento(driver, xpath)
     elemento = driver.find_element(By.XPATH, xpath)
     elemento.click()
@@ -38,11 +43,11 @@ def inserir_texto(driver, xpath, texto):
     elemento.send_keys(texto)
 
 def clicar_elemento(driver, xpath):
-    """Clica em um elemento identificado pelo XPath."""
+    # print(f"Clicando no elemento...")
     driver.find_element(By.XPATH, xpath).click()
 
 def gerar_otp():
-    """Gera um código OTP via requisição para API."""
+    print("Gerando OTP...")
     response = requests.post(
         'http://localhost:8000/generate_otp', 
         json={"secret": "GZRDMZTGMFSWILLDGMZTALJUGQ2DQLJYGQYWMLJQGA4GCMZWGBRWGMZUMQ======"}
@@ -54,7 +59,7 @@ def gerar_otp():
         exit(1)
 
 def selecionar_data(driver, xpath, data):
-    """Define uma data em um campo de input date-picker."""
+    print("Computando datas...")
     elemento = esperar_elemento(driver, xpath)
     elemento.clear()
     elemento.click()
@@ -62,7 +67,7 @@ def selecionar_data(driver, xpath, data):
     driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
 
 def selecionar_texto(driver, xpath, text):
-    """Insere um valor de texto em um campo de input."""
+    # print("Selecionando textos...")
     elemento = esperar_elemento(driver, xpath)
     elemento.click()
     elemento.clear()
@@ -72,7 +77,7 @@ def selecionar_texto(driver, xpath, text):
     driver.find_element(By.XPATH, xpath).send_keys(Keys.ENTER)
 
 def realizar_download_atividades(driver, button_xpath):
-    """Realiza o download de um arquivo após confirmação de código OTP."""
+    print("Realizando download de atividades...")
     clicar_elemento(driver, button_xpath)
     esperar_elemento(driver, '//*[contains(@id, "input-vaadin-number-field-")]')
     
@@ -84,28 +89,33 @@ def realizar_download_atividades(driver, button_xpath):
     inserir_texto(driver, "//vaadin-number-field//input[contains(@id, 'input-vaadin-number-field-')]", int(codigo_texto))
     clicar_elemento(driver, "//vaadin-button[text()='Sim, Tenho certeza']")
     esperar_elemento(driver, "//vaadin-dialog-overlay[@id='overlay']//a[@href]")
+    time.sleep(10)
     clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
     clicar_elemento(driver, "//vaadin-button[text()='Fechar']")
     fechar_modal(driver)
+    print("Atividades baixadas com sucesso sucesso.")
 
 def realizar_download_producao(driver):
-    """Realiza o download de um arquivo."""    
+    print("Realizando download de produção...")
     esperar_elemento(driver, "//vaadin-dialog-overlay[@id='overlay']//a[@href]", 300)
+    time.sleep(10)
     clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
     clicar_elemento(driver, "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button")
+    print("Produção baixado com sucesso.")
 
 def fechar_modal(driver):
-    """Fecha o modal se estiver presente"""
+    # print("Fechando modal...")
     try:
         overlay = driver.find_element(By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")
         if overlay.is_displayed():
             driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)  # Pressiona ESC
             WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")))
-            print("Modal fechado.")
+            # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
 
 def exportAtividadesStatus(driver):
+    print("Exportando atividades<>status...")
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     
@@ -118,6 +128,7 @@ def exportAtividadesStatus(driver):
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
 
 def exportAtividades(driver):
+    print("Exportando atividades...")
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     
@@ -130,7 +141,7 @@ def exportAtividades(driver):
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarAtividades")]')
 
 def exportProducao(driver):
-    """ Painel de Produção """
+    print("Exportando produção...")
     esperar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
 
@@ -146,6 +157,7 @@ def exportProducao(driver):
 
 def login(driver):
     acessar_pagina(driver, url)
+    print("Realizando login...")
     esperar_elemento(driver, '//*[contains(@id, "input-vaadin-text-field-")]')
     
     inserir_texto(driver, '//*[contains(@id, "input-vaadin-text-field-")]', username)
@@ -173,6 +185,7 @@ def login(driver):
     print("Login realizado com sucesso!")
 
 def logout(driver):
+    print("Realizando logout...")
     btn_logout_xpath = "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]"
     option_logout_xpath = "/html/body/vaadin-menu-bar-overlay/vaadin-menu-bar-list-box/vaadin-menu-bar-item[4]"
     esperar_elemento(driver, btn_logout_xpath)
@@ -181,6 +194,7 @@ def logout(driver):
     clicar_elemento(driver, option_logout_xpath)
 
 def renomear_arquivos(arquivos, diretorio_origem):
+    print("Renomeando arquivos...")
     data_atual = datetime.now().strftime('%Y%m%d_%H%M%S')
     arquivos_renomeados = {}
     
@@ -196,6 +210,7 @@ def renomear_arquivos(arquivos, diretorio_origem):
     return arquivos_renomeados
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
+    print(f"Movendo arquivos de histórico...")
     if not os.path.exists(diretorio_destino):
         os.makedirs(diretorio_destino)
     
@@ -209,23 +224,31 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         if os.path.isfile(caminho_item):
             shutil.move(caminho_item, os.path.join(caminho_subdiretorio, item))
     
-    # Renomear e mover os novos arquivos para o diretório de destino
-    arquivos_renomeados = renomear_arquivos(arquivos, diretorio_origem)
-    for original, novo_nome in arquivos_renomeados.items():
-        caminho_origem = os.path.join(diretorio_origem, original)
-        caminho_destino = os.path.join(diretorio_destino, novo_nome)
+    # Mover os novos arquivos para o diretório de destino antes de renomear
+    for arquivo in arquivos:
+        caminho_origem = os.path.join(diretorio_origem, arquivo)
+        caminho_destino = os.path.join(diretorio_destino, arquivo)
         if os.path.exists(caminho_origem):
             shutil.move(caminho_origem, caminho_destino)
         else:
-            print(f"Arquivo não encontrado para mover: {original}")
+            print(f"Arquivo não encontrado para mover: {arquivo}")
+    
+    # Renomear apenas os arquivos dentro do subdiretório
+    arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio)
+    for original, novo_nome in arquivos_renomeados.items():
+        caminho_origem = os.path.join(caminho_subdiretorio, original)
+        caminho_destino = os.path.join(caminho_subdiretorio, novo_nome)
+        if os.path.exists(caminho_origem):
+            os.rename(caminho_origem, caminho_destino)
+        else:
+            print(f"Arquivo não encontrado para renomear: {original}")
 
-""" Execução principal """
 def executar_rotina():
     while True:
         driver = iniciar_driver()
         try:
             data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f"Iniciando download de arquivos em {data_atual}")
+            print(f"Iniciando em {data_atual}")
 
             login(driver)
             exportAtividadesStatus(driver)
@@ -256,9 +279,9 @@ def executar_rotina():
             data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"Finalizado em {data_atual}")
             driver.quit()
-        
-        print("Aguardando 30 minutos para a próxima execução...")
-        time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)
 
-""" Iniciar a execução em uma thread """
-threading.Thread(target=executar_rotina, daemon=True).start()
+        print("Aguardando 30 minutos para a próxima execução...")
+        time.sleep(5)  # Aguarda 30 minutos (1800 segundos)
+
+threading.Thread(target=executar_rotina, daemon=False).start()
+# executar_rotina()
