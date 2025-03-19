@@ -1,10 +1,19 @@
-import requests, time, os, shutil, threading
+import requests
+import time
+import os
+import shutil
+import threading
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.edge.options import Options as EdgeOptions
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -16,12 +25,21 @@ url = os.getenv("SYS_URL")
 username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 
-
-def iniciar_driver():
+def iniciar_driver(navegador='edge'):
     print("Iniciando driver do navegador...")
-    options = Options()
-    options.add_argument("--headless")
-    driver = webdriver.Firefox(options=options)
+    if navegador.lower() == 'chrome':
+        options = ChromeOptions()
+        # options.add_argument("--headless")  # Descomente para rodar em modo headless
+        driver = webdriver.Chrome(service=ChromeService(), options=options)
+    elif navegador.lower() == 'firefox':
+        options = FirefoxOptions()
+        # options.add_argument("--headless")  # Descomente para rodar em modo headless
+        driver = webdriver.Firefox(service=FirefoxService(), options=options)
+    else:  # Padrão para Edge
+        options = EdgeOptions()
+        # options.add_argument("--headless")  # Descomente para rodar em modo headless
+        driver = webdriver.Edge(service=EdgeService(), options=options)
+    
     return driver
 
 def acessar_pagina(driver, url):
@@ -29,13 +47,11 @@ def acessar_pagina(driver, url):
     print(f"Acessando {url}")
 
 def esperar_elemento(driver, xpath, tempo=300):
-    # print("Elemento em espera...")
     return WebDriverWait(driver, tempo).until(
         EC.presence_of_element_located((By.XPATH, xpath))
     )
 
 def inserir_texto(driver, xpath, texto):
-    # print("Inserindo texto...")
     esperar_elemento(driver, xpath)
     elemento = driver.find_element(By.XPATH, xpath)
     elemento.click()
@@ -43,7 +59,6 @@ def inserir_texto(driver, xpath, texto):
     elemento.send_keys(texto)
 
 def clicar_elemento(driver, xpath):
-    # print(f"Clicando no elemento...")
     driver.find_element(By.XPATH, xpath).click()
 
 def gerar_otp():
@@ -67,13 +82,11 @@ def selecionar_data(driver, xpath, data):
     driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
 
 def selecionar_texto(driver, xpath, text):
-    # print("Selecionando textos...")
     elemento = esperar_elemento(driver, xpath)
     elemento.click()
     elemento.clear()
     elemento.send_keys(text)
     time.sleep(5)
-    # driver.find_element(By.XPATH, xpath).send_keys(Keys.RETURN)
     driver.find_element(By.XPATH, xpath).send_keys(Keys.ENTER)
 
 def realizar_download_atividades(driver, button_xpath):
@@ -81,7 +94,6 @@ def realizar_download_atividades(driver, button_xpath):
     clicar_elemento(driver, button_xpath)
     esperar_elemento(driver, '//*[contains(@id, "input-vaadin-number-field-")]')
     
-    # Obter código de verificação
     xpath_codigo = '//vaadin-vertical-layout//div/span/b[not(contains(text(), "EXPORTAR")) and normalize-space()]'
     codigo_elemento = esperar_elemento(driver, xpath_codigo)
     codigo_texto = codigo_elemento.text
@@ -93,7 +105,7 @@ def realizar_download_atividades(driver, button_xpath):
     clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
     clicar_elemento(driver, "//vaadin-button[text()='Fechar']")
     fechar_modal(driver)
-    print("Atividades baixadas com sucesso sucesso.")
+    print("Atividades baixadas com sucesso.")
 
 def realizar_download_producao(driver):
     print("Realizando download de produção...")
@@ -104,13 +116,11 @@ def realizar_download_producao(driver):
     print("Produção baixado com sucesso.")
 
 def fechar_modal(driver):
-    # print("Fechando modal...")
     try:
         overlay = driver.find_element(By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")
         if overlay.is_displayed():
-            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)  # Pressiona ESC
+            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
             WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")))
-            # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
 
@@ -169,18 +179,16 @@ def login(driver):
         inserir_texto(driver, '//vaadin-text-field//input[contains(@id, "input-vaadin-text-field-21")]', otp)
         clicar_elemento(driver, '//*[contains(@id, "btnLogar")]')
         
-        # Aguarda um curto período para a mensagem de erro aparecer (se houver)
         time.sleep(2) 
         
-        # Verifica se a mensagem de erro está presente
         try:
             mensagem = driver.find_element(By.XPATH, '/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/div/span/center').text
             
             if mensagem in ["Usuário não encontrado", "Código autenticador inválido", "Usuário inexistente ou senha inválida"]:
                 print("Erro detectado, tentando novamente...")
-                continue  # Repete o processo de OTP
+                continue
         except:
-            break  # Sai do loop se a mensagem de erro não for encontrada
+            break
     
     print("Login realizado com sucesso!")
 
@@ -218,13 +226,11 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     if not os.path.exists(caminho_subdiretorio):
         os.makedirs(caminho_subdiretorio)
     
-    # Mover arquivos existentes na raiz do diretório de destino para o subdiretório
     for item in os.listdir(diretorio_destino):
         caminho_item = os.path.join(diretorio_destino, item)
         if os.path.isfile(caminho_item):
             shutil.move(caminho_item, os.path.join(caminho_subdiretorio, item))
     
-    # Mover os novos arquivos para o diretório de destino antes de renomear
     for arquivo in arquivos:
         caminho_origem = os.path.join(diretorio_origem, arquivo)
         caminho_destino = os.path.join(diretorio_destino, arquivo)
@@ -233,7 +239,6 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado para mover: {arquivo}")
     
-    # Renomear apenas os arquivos dentro do subdiretório
     arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio)
     for original, novo_nome in arquivos_renomeados.items():
         caminho_origem = os.path.join(caminho_subdiretorio, original)
@@ -243,9 +248,9 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado para renomear: {original}")
 
-def executar_rotina():
+def executar_rotina(navegador='edge'):
     while True:
-        driver = iniciar_driver()
+        driver = iniciar_driver(navegador)
         try:
             data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"Iniciando em {data_atual}")
@@ -267,9 +272,9 @@ def executar_rotina():
             logout(driver)
             time.sleep(5)
 
-            dirOrigem = "C:/Users/Dev/Downloads"
-            dirDestino = "C:/Users/Dev/Downloads/baixados"
-            subDiretorio = "movidos"
+            dirOrigem = "C:/Users/Avantti/Downloads"
+            dirDestino = "N:"
+            subDiretorio = "histórico"
             nomeArquivo1 = "Exportacao Atividade.xlsx"
             nomeArquivo2 = "Exportacao Status.xlsx"
             nomeArquivo3 = "ExportacaoProducao.xlsx"
@@ -281,7 +286,10 @@ def executar_rotina():
             driver.quit()
 
         print("Aguardando 30 minutos para a próxima execução...")
-        time.sleep(5)  # Aguarda 30 minutos (1800 segundos)
+        print("   ")
+        print("   ")
+        time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)       
 
-threading.Thread(target=executar_rotina, daemon=False).start()
-# executar_rotina()
+# Inicie a rotina com o navegador desejado
+navegador_desejado = 'chrome'  # 'chrome' ou 'firefox' ou 'edge'
+threading.Thread(target=executar_rotina, args=(navegador_desejado,), daemon=False).start()
