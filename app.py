@@ -1,4 +1,4 @@
-import requests, time, os, shutil, threading
+import requests, time, os, shutil
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
@@ -237,32 +237,52 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
             os.rename(caminho_origem, caminho_destino)
         else:
             print(f"Arquivo não encontrado para renomear: {original}")
+def save_log(text, filename="log.txt"):
+    # Define o diretório de logs na raiz da aplicação
+    log_dir = os.path.join(os.getcwd(), "logs")
+    
+    # Cria o diretório se não existir
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Caminho completo do arquivo
+    file_path = os.path.join(log_dir, filename)
+    
+    # Escreve o texto no arquivo
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write(text)
+    
+    print(f"Log salvo em: {file_path}")
 
 def executar_rotina():
-    while True:
-        driver = iniciar_driver(navegador)
+    start = True
+    while start:
         try:
             data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"Iniciando em {data_atual}")
 
+            driver = iniciar_driver()
             login(driver)
             exportAtividadesStatus(driver)
             logout(driver)
-            driver.refresh()
-            time.sleep(5)
+            driver.quit()
+            time.sleep(10)
             
+            driver = iniciar_driver()
             login(driver)
             exportAtividades(driver)
             logout(driver)
-            driver.refresh()
-            time.sleep(5)
+            driver.quit()
+            time.sleep(10)
             
+            driver = iniciar_driver()
             login(driver)
             exportProducao(driver)
             logout(driver)
-            time.sleep(5)
+            driver.quit()
+            time.sleep(10)
 
-            dirOrigem = "C:/Users/Avantti/Downloads"
+            sysUser = os.getenv("USERNAME")
+            dirOrigem = F"C:/Users/{sysUser}/Downloads"
             dirDestino = "N:"
             subDiretorio = "histórico"
             nomeArquivo1 = "Exportacao Atividade.xlsx"
@@ -270,13 +290,14 @@ def executar_rotina():
             nomeArquivo3 = "ExportacaoProducao.xlsx"
 
             mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
-        finally:
             data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"Finalizado em {data_atual}")
             driver.quit()
+            print("Aguardando 30 minutos para a próxima execução...")
+            time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)
+        
+        except Exception as e:
+            start = False
+            save_log(e)
 
-        print("Aguardando 30 minutos para a próxima execução...")
-        time.sleep(5)  # Aguarda 30 minutos (1800 segundos)
-
-threading.Thread(target=executar_rotina, daemon=False).start()
-# executar_rotina()
+executar_rotina()
