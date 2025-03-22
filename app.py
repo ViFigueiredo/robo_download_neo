@@ -20,7 +20,7 @@ password = os.getenv("SYS_PASSWORD")
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    options.add_argument("--headless")
+    # options.add_argument("--headless")
     driver = webdriver.Firefox(options=options)
     return driver
 
@@ -121,8 +121,8 @@ def exportAtividadesStatus(driver):
     ano_atual = datetime.now().year
     data_inicial = f"01/{mes_atual}/{ano_atual}"
     
-    selecionar_data(driver, '//*[contains(@id, "input-vaadin-date-picker-160")]', data_inicial)
-    clicar_elemento(driver, '//*[contains(@id, "btnPesquisar")]')
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
+    clicar_elemento(driver, '//*[@id="btnPesquisar"]')
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
 
 def exportAtividades(driver):
@@ -134,9 +134,9 @@ def exportAtividades(driver):
     ano_atual = datetime.now().year
     data_inicial = f"01/{mes_atual}/{ano_atual}"
     
-    selecionar_data(driver, '//*[contains(@id, "input-vaadin-date-picker-160")]', data_inicial)
-    clicar_elemento(driver, '//*[contains(@id, "btnPesquisar")]')
-    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarAtividades")]')
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
+    clicar_elemento(driver, '//*[@id="btnPesquisar"]')
+    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
 
 def exportProducao(driver):
     print("Exportando produção...")
@@ -146,9 +146,9 @@ def exportProducao(driver):
     data_inicial = (datetime.now() - timedelta(days=90)).strftime("%d/%m/%Y")
     texto = "Painel de Produção Vivo"   
 
-    selecionar_data(driver, '//*[contains(@id, "input-vaadin-date-picker-55")]', data_inicial)
-    selecionar_texto(driver, '//*[contains(@id, "input-vaadin-combo-box-58")]', texto)
-    clicar_elemento(driver, '//*[contains(@id, "input-vaadin-radio-button-73")]')
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-53"]', data_inicial)
+    selecionar_texto(driver, '//*[@id="input-vaadin-combo-box-56"]', texto)
+    clicar_elemento(driver, '//*[@id="input-vaadin-radio-button-71"]')
     clicar_elemento(driver, "//vaadin-button[contains(text(), 'Pesquisar') and @role='button']")
     realizar_download_producao(driver)
     fechar_modal(driver)
@@ -164,7 +164,8 @@ def login(driver):
     while True:
         otp = gerar_otp()
         clicar_elemento(driver, '//*[contains(@id, "input-vaadin-radio-button-")]')
-        inserir_texto(driver, '//vaadin-text-field//input[contains(@id, "input-vaadin-text-field-21")]', otp)
+        clicar_elemento(driver, '//*[@id="input-vaadin-text-field-19"]')
+        inserir_texto(driver, '//*[@id="input-vaadin-text-field-19"]', otp)
         clicar_elemento(driver, '//*[contains(@id, "btnLogar")]')
         
         time.sleep(2) 
@@ -237,20 +238,26 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
             os.rename(caminho_origem, caminho_destino)
         else:
             print(f"Arquivo não encontrado para renomear: {original}")
-def save_log(text, filename="log.txt"):
+
+def save_log(text, filename=None):
     # Define o diretório de logs na raiz da aplicação
-    log_dir = os.path.join(os.getcwd(), "logs")
-    
+    log_dir = os.path.join(os.getcwd(), "logs")    
+
     # Cria o diretório se não existir
-    os.makedirs(log_dir, exist_ok=True)
-    
+    os.makedirs(log_dir, exist_ok=True)    
+
+    # Se nenhum nome de arquivo for fornecido, cria um com a data e hora atual
+    if filename is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"log_{timestamp}.txt"    
+
     # Caminho completo do arquivo
-    file_path = os.path.join(log_dir, filename)
-    
+    file_path = os.path.join(log_dir, filename)    
+
     # Escreve o texto no arquivo
     with open(file_path, "w", encoding="utf-8") as file:
-        file.write(text)
-    
+        file.write(text)    
+
     print(f"Log salvo em: {file_path}")
 
 def executar_rotina():
@@ -264,6 +271,7 @@ def executar_rotina():
             login(driver)
             exportAtividadesStatus(driver)
             logout(driver)
+            time.sleep(5)
             driver.quit()
             time.sleep(10)
             
@@ -271,6 +279,7 @@ def executar_rotina():
             login(driver)
             exportAtividades(driver)
             logout(driver)
+            time.sleep(5)
             driver.quit()
             time.sleep(10)
             
@@ -278,6 +287,7 @@ def executar_rotina():
             login(driver)
             exportProducao(driver)
             logout(driver)
+            time.sleep(5)
             driver.quit()
             time.sleep(10)
 
@@ -298,6 +308,7 @@ def executar_rotina():
         
         except Exception as e:
             start = False
-            save_log(e)
+            # Converte a exceção em string e salva no log
+            save_log(str(e))
 
 executar_rotina()
