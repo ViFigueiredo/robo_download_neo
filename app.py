@@ -350,8 +350,10 @@ def executar_rotina():
         save_log(str(e))  # Registra o erro no log
 
 # Agendar a função para rodar a cada 30 minutos dentro do intervalo
-print("Aguardando a próxima execução...")
-schedule.every(30).minutes.do(executar_rotina)
+# print("Aguardando a próxima execução...")
+# executar_rotina()
+schedule.every(0).minutes.do(executar_rotina)
+
 
 while True:
     agora = datetime.now().hour
