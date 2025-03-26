@@ -1,4 +1,4 @@
-import requests, time, os, shutil
+import requests, time, os, shutil, schedule
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
@@ -20,7 +20,7 @@ password = os.getenv("SYS_PASSWORD")
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    # options.add_argument("--headless")
+    options.add_argument("--headless")
     driver = webdriver.Firefox(options=options)
     return driver
 
@@ -136,7 +136,7 @@ def exportAtividades(driver):
     
     selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
     clicar_elemento(driver, '//*[@id="btnPesquisar"]')
-    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
+    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarAtividades")]')
 
 def exportProducao(driver):
     print("Exportando produção...")
@@ -190,19 +190,20 @@ def logout(driver):
     esperar_elemento(driver, option_logout_xpath)
     clicar_elemento(driver, option_logout_xpath)
 
-def renomear_arquivos(arquivos, diretorio_origem):
+def renomear_arquivos(arquivos, diretorio_origem, arquivos_novos):
     print("Renomeando arquivos...")
     data_atual = datetime.now().strftime('%Y%m%d_%H%M%S')
     arquivos_renomeados = {}
     
     for arquivo in arquivos:
-        caminho_original = os.path.join(diretorio_origem, arquivo)
-        if os.path.exists(caminho_original):
-            nome, ext = os.path.splitext(arquivo)
-            novo_nome = f"{nome}_{data_atual}{ext}"
-            arquivos_renomeados[arquivo] = novo_nome
-        else:
-            print(f"Arquivo não encontrado: {arquivo}")
+        if arquivo in arquivos_novos:  # Renomeia apenas novos arquivos
+            caminho_original = os.path.join(diretorio_origem, arquivo)
+            if os.path.exists(caminho_original):
+                nome, ext = os.path.splitext(arquivo)
+                novo_nome = f"{nome}_{data_atual}{ext}"
+                arquivos_renomeados[arquivo] = novo_nome
+            else:
+                print(f"Arquivo não encontrado: {arquivo}")
     
     return arquivos_renomeados
 
@@ -220,17 +221,20 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         if os.path.isfile(caminho_item):
             shutil.move(caminho_item, os.path.join(caminho_subdiretorio, item))
     
-    # Mover os novos arquivos para o diretório de destino antes de renomear
+    # Mover os novos arquivos para o diretório de destino
+    arquivos_novos = []
     for arquivo in arquivos:
         caminho_origem = os.path.join(diretorio_origem, arquivo)
-        caminho_destino = os.path.join(diretorio_destino, arquivo)
+        caminho_destino = os.path.join(caminho_subdiretorio, arquivo)
         if os.path.exists(caminho_origem):
-            shutil.move(caminho_origem, caminho_destino)
+            if not os.path.exists(caminho_destino):  # Verifica se já existe no subdiretório
+                shutil.move(caminho_origem, caminho_destino)
+                arquivos_novos.append(arquivo)
         else:
             print(f"Arquivo não encontrado para mover: {arquivo}")
     
-    # Renomear apenas os arquivos dentro do subdiretório
-    arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio)
+    # Renomear apenas os novos arquivos
+    arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio, arquivos_novos)
     for original, novo_nome in arquivos_renomeados.items():
         caminho_origem = os.path.join(caminho_subdiretorio, original)
         caminho_destino = os.path.join(caminho_subdiretorio, novo_nome)
@@ -260,55 +264,100 @@ def save_log(text, filename=None):
 
     print(f"Log salvo em: {file_path}")
 
+def save_log(text, filename=None):
+    """Salva mensagens de erro em um arquivo de log no diretório logs/."""
+    log_dir = os.path.join(os.getcwd(), "logs")    
+
+    # Cria o diretório se não existir
+    os.makedirs(log_dir, exist_ok=True)    
+
+    # Se nenhum nome de arquivo for fornecido, cria um com a data e hora atual
+    if filename is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"log_{timestamp}.txt"    
+
+    # Caminho completo do arquivo
+    file_path = os.path.join(log_dir, filename)    
+
+    # Escreve o texto no arquivo
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write(text)    
+
+    print(f"Log salvo em: {file_path}")
+
+def log_existe():
+    """Verifica se há arquivos de log no diretório logs/."""
+    log_dir = os.path.join(os.getcwd(), "logs")
+    if os.path.exists(log_dir):
+        return any(f.endswith(".txt") for f in os.listdir(log_dir))
+    return False
+
+def limpar_logs():
+    """Remove todos os arquivos de log do diretório logs/ após execução bem-sucedida."""
+    log_dir = os.path.join(os.getcwd(), "logs")
+    if os.path.exists(log_dir):
+        for f in os.listdir(log_dir):
+            if f.endswith(".txt"):
+                os.remove(os.path.join(log_dir, f))
+        print("Logs limpos.")
+
 def executar_rotina():
-    start = True
-    while start:
-        try:
-            data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f"Iniciando em {data_atual}")
+    try:
+        data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"Iniciando em {data_atual}")
 
-            driver = iniciar_driver()
-            login(driver)
-            exportAtividadesStatus(driver)
-            logout(driver)
-            time.sleep(5)
-            driver.quit()
-            time.sleep(10)
-            
-            driver = iniciar_driver()
-            login(driver)
-            exportAtividades(driver)
-            logout(driver)
-            time.sleep(5)
-            driver.quit()
-            time.sleep(10)
-            
-            driver = iniciar_driver()
-            login(driver)
-            exportProducao(driver)
-            logout(driver)
-            time.sleep(5)
-            driver.quit()
-            time.sleep(10)
+        driver = iniciar_driver()
+        login(driver)
+        exportAtividadesStatus(driver)
+        logout(driver)
+        time.sleep(5)
+        driver.quit()
+        time.sleep(10)
 
-            sysUser = os.getenv("USERNAME")
-            dirOrigem = F"C:/Users/{sysUser}/Downloads"
-            dirDestino = "N:"
-            subDiretorio = "histórico"
-            nomeArquivo1 = "Exportacao Atividade.xlsx"
-            nomeArquivo2 = "Exportacao Status.xlsx"
-            nomeArquivo3 = "ExportacaoProducao.xlsx"
+        driver = iniciar_driver()
+        login(driver)
+        exportAtividades(driver)
+        logout(driver)
+        time.sleep(5)
+        driver.quit()
+        time.sleep(10)
 
-            mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
-            data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f"Finalizado em {data_atual}")
-            driver.quit()
-            print("Aguardando 30 minutos para a próxima execução...")
-            time.sleep(1800)  # Aguarda 30 minutos (1800 segundos)
-        
-        except Exception as e:
-            start = False
-            # Converte a exceção em string e salva no log
-            save_log(str(e))
+        driver = iniciar_driver()
+        login(driver)
+        exportProducao(driver)
+        logout(driver)
+        time.sleep(5)
+        driver.quit()
+        time.sleep(10)
 
-executar_rotina()
+        sysUser = os.getenv("USERNAME")
+        dirOrigem = f"C:/Users/{sysUser}/Downloads"
+        dirDestino = "N:"
+        subDiretorio = "histórico"
+        nomeArquivo1 = "Exportacao Atividade.xlsx"
+        nomeArquivo2 = "Exportacao Status.xlsx"
+        nomeArquivo3 = "ExportacaoProducao.xlsx"
+
+        mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
+
+        data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"Finalizado em {data_atual}")
+
+        # Se a execução foi bem-sucedida, limpar os logs
+        limpar_logs()
+
+    except Exception as e:
+        save_log(str(e))  # Registra o erro no log
+
+# Agendar a função para rodar a cada 30 minutos dentro do intervalo
+print("Aguardando a próxima execução...")
+schedule.every(30).minutes.do(executar_rotina)
+
+while True:
+    agora = datetime.now().hour
+    if 8 <= agora < 22:
+        schedule.run_pending()  # Executa as tarefas agendadas
+        if log_existe():  # Se houver erro no log, tenta executar novamente
+            print("Erro detectado. Tentando executar novamente...")
+            executar_rotina()
+    time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
