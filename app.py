@@ -208,7 +208,8 @@ def renomear_arquivos(arquivos, diretorio_origem, arquivos_novos):
     return arquivos_renomeados
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
-    print(f"Movendo arquivos de histórico...")
+    print("Movendo arquivos de histórico...")
+    
     if not os.path.exists(diretorio_destino):
         os.makedirs(diretorio_destino)
     
@@ -216,90 +217,35 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     if not os.path.exists(caminho_subdiretorio):
         os.makedirs(caminho_subdiretorio)
     
-    for item in os.listdir(diretorio_destino):
-        caminho_item = os.path.join(diretorio_destino, item)
-        if os.path.isfile(caminho_item):
-            shutil.move(caminho_item, os.path.join(caminho_subdiretorio, item))
+    arquivos_no_destino = [f for f in os.listdir(diretorio_destino) if os.path.isfile(os.path.join(diretorio_destino, f))]
     
-    # Mover os novos arquivos para o diretório de destino
-    arquivos_novos = []
+    if arquivos_no_destino:
+        print("Arquivos encontrados no diretório de destino. Renomeando e movendo para o subdiretório...")
+        arquivos_renomeados = renomear_arquivos(arquivos_no_destino, diretorio_destino)
+        
+        for original, novo_nome in arquivos_renomeados.items():
+            caminho_origem = os.path.join(diretorio_destino, original)
+            caminho_destino = os.path.join(caminho_subdiretorio, novo_nome)
+            if os.path.exists(caminho_origem):
+                shutil.move(caminho_origem, caminho_destino)
+            else:
+                print(f"Arquivo não encontrado para renomear e mover: {original}")
+    
+    if not arquivos_no_destino:
+        print("Nenhum arquivo encontrado no diretório de destino. Movendo novos arquivos sem renomear...")
+    
     for arquivo in arquivos:
         caminho_origem = os.path.join(diretorio_origem, arquivo)
-        caminho_destino = os.path.join(caminho_subdiretorio, arquivo)
+        caminho_destino = os.path.join(diretorio_destino, arquivo)
+        
         if os.path.exists(caminho_origem):
-            if not os.path.exists(caminho_destino):  # Verifica se já existe no subdiretório
+            if not os.path.exists(caminho_destino):
                 shutil.move(caminho_origem, caminho_destino)
-                arquivos_novos.append(arquivo)
+            else:
+                print(f"Arquivo já existe no destino e não será movido: {arquivo}")
         else:
-            print(f"Arquivo não encontrado para mover: {arquivo}")
-    
-    # Renomear apenas os novos arquivos
-    arquivos_renomeados = renomear_arquivos(os.listdir(caminho_subdiretorio), caminho_subdiretorio, arquivos_novos)
-    for original, novo_nome in arquivos_renomeados.items():
-        caminho_origem = os.path.join(caminho_subdiretorio, original)
-        caminho_destino = os.path.join(caminho_subdiretorio, novo_nome)
-        if os.path.exists(caminho_origem):
-            os.rename(caminho_origem, caminho_destino)
-        else:
-            print(f"Arquivo não encontrado para renomear: {original}")
+            print(f"Arquivo não encontrado na origem: {arquivo}")
 
-def save_log(text, filename=None):
-    # Define o diretório de logs na raiz da aplicação
-    log_dir = os.path.join(os.getcwd(), "logs")    
-
-    # Cria o diretório se não existir
-    os.makedirs(log_dir, exist_ok=True)    
-
-    # Se nenhum nome de arquivo for fornecido, cria um com a data e hora atual
-    if filename is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"log_{timestamp}.txt"    
-
-    # Caminho completo do arquivo
-    file_path = os.path.join(log_dir, filename)    
-
-    # Escreve o texto no arquivo
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(text)    
-
-    print(f"Log salvo em: {file_path}")
-
-def save_log(text, filename=None):
-    """Salva mensagens de erro em um arquivo de log no diretório logs/."""
-    log_dir = os.path.join(os.getcwd(), "logs")    
-
-    # Cria o diretório se não existir
-    os.makedirs(log_dir, exist_ok=True)    
-
-    # Se nenhum nome de arquivo for fornecido, cria um com a data e hora atual
-    if filename is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"log_{timestamp}.txt"    
-
-    # Caminho completo do arquivo
-    file_path = os.path.join(log_dir, filename)    
-
-    # Escreve o texto no arquivo
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(text)    
-
-    print(f"Log salvo em: {file_path}")
-
-def log_existe():
-    """Verifica se há arquivos de log no diretório logs/."""
-    log_dir = os.path.join(os.getcwd(), "logs")
-    if os.path.exists(log_dir):
-        return any(f.endswith(".txt") for f in os.listdir(log_dir))
-    return False
-
-def limpar_logs():
-    """Remove todos os arquivos de log do diretório logs/ após execução bem-sucedida."""
-    log_dir = os.path.join(os.getcwd(), "logs")
-    if os.path.exists(log_dir):
-        for f in os.listdir(log_dir):
-            if f.endswith(".txt"):
-                os.remove(os.path.join(log_dir, f))
-        print("Logs limpos.")
 
 def executar_rotina():
     try:
@@ -343,21 +289,19 @@ def executar_rotina():
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"Finalizado em {data_atual}")
 
-        # Se a execução foi bem-sucedida, limpar os logs
-        limpar_logs()
-
     except Exception as e:
-        save_log(str(e))  # Registra o erro no log
+        print(e) # Registra o erro no log
 
 # Agendar a função para rodar a cada 30 minutos dentro do intervalo
 print("Aguardando a próxima execução...")
-schedule.every(30).minutes.do(executar_rotina)
+# schedule.every().minutes.do(executar_rotina)
+executar_rotina()
 
-while True:
-    agora = datetime.now().hour
-    if 8 <= agora < 22:
-        schedule.run_pending()  # Executa as tarefas agendadas
-        if log_existe():  # Se houver erro no log, tenta executar novamente
-            print("Erro detectado. Tentando executar novamente...")
-            executar_rotina()
-    time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
+# while True:
+#     agora = datetime.now().hour
+#     if 8 <= agora < 22:
+#         schedule.run_pending()  # Executa as tarefas agendadas
+#         if log_existe():  # Se houver erro no log, tenta executar novamente
+#             print("Erro detectado. Tentando executar novamente...")
+#             executar_rotina()
+#     time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
