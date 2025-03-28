@@ -293,15 +293,14 @@ def executar_rotina():
         print(e) # Registra o erro no log
 
 # Agendar a função para rodar a cada 30 minutos dentro do intervalo
-print("Aguardando a próxima execução...")
-# schedule.every().minutes.do(executar_rotina)
-executar_rotina()
+# print("Aguardando a próxima execução...")
+# executar_rotina()
+schedule.every(0).minutes.do(executar_rotina)
 
-# while True:
-#     agora = datetime.now().hour
-#     if 8 <= agora < 22:
-#         schedule.run_pending()  # Executa as tarefas agendadas
-#         if log_existe():  # Se houver erro no log, tenta executar novamente
-#             print("Erro detectado. Tentando executar novamente...")
-#             executar_rotina()
-#     time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
+
+while True:
+    agora = datetime.now().hour
+    if 8 <= agora < 22:
+        schedule.run_pending()  # Executa as tarefas agendadas
+        executar_rotina()
+    time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
