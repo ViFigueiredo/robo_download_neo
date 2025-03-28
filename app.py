@@ -246,7 +246,6 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         else:
             print(f"Arquivo não encontrado na origem: {arquivo}")
 
-
 def executar_rotina():
     try:
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
