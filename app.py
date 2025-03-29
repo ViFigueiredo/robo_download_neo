@@ -190,48 +190,52 @@ def logout(driver):
     esperar_elemento(driver, option_logout_xpath)
     clicar_elemento(driver, option_logout_xpath)
 
-def renomear_arquivos(arquivos, diretorio_origem, arquivos_novos):
+def renomear_arquivos(arquivos, diretorio_origem):
     print("Renomeando arquivos...")
     data_atual = datetime.now().strftime('%Y%m%d_%H%M%S')
     arquivos_renomeados = {}
     
     for arquivo in arquivos:
-        if arquivo in arquivos_novos:  # Renomeia apenas novos arquivos
-            caminho_original = os.path.join(diretorio_origem, arquivo)
-            if os.path.exists(caminho_original):
-                nome, ext = os.path.splitext(arquivo)
-                novo_nome = f"{nome}_{data_atual}{ext}"
-                arquivos_renomeados[arquivo] = novo_nome
-            else:
-                print(f"Arquivo não encontrado: {arquivo}")
+        caminho_original = os.path.join(diretorio_origem, arquivo)
+        if os.path.exists(caminho_original):
+            nome, ext = os.path.splitext(arquivo)
+            novo_nome = f"{nome}_{data_atual}{ext}"
+            novo_caminho = os.path.join(diretorio_origem, novo_nome)
+            os.rename(caminho_original, novo_caminho)
+            arquivos_renomeados[arquivo] = novo_nome
+        else:
+            print(f"Arquivo não encontrado: {arquivo}")
     
     return arquivos_renomeados
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     print("Movendo arquivos de histórico...")
-
+    
     if not os.path.exists(diretorio_destino):
         os.makedirs(diretorio_destino)
-
+    
     caminho_subdiretorio = os.path.join(diretorio_destino, subdiretorio)
     if not os.path.exists(caminho_subdiretorio):
         os.makedirs(caminho_subdiretorio)
-
-    for arquivo in arquivos:
-        caminho_origem = os.path.join(diretorio_origem, arquivo)
-        caminho_destino = os.path.join(diretorio_destino, arquivo)
-        caminho_subdestino = os.path.join(caminho_subdiretorio, arquivo)
-
-        # Se o arquivo já existe no destino, mova-o para o subdiretório
+    
+    arquivos_renomeados = renomear_arquivos(arquivos, diretorio_origem)
+    
+    for arquivo, novo_nome in arquivos_renomeados.items():
+        caminho_origem = os.path.join(diretorio_origem, novo_nome)
+        caminho_destino = os.path.join(diretorio_destino, novo_nome)
+        caminho_subdestino = os.path.join(caminho_subdiretorio, novo_nome)
+        
         if os.path.exists(caminho_destino):
-            print(f"Arquivo {arquivo} já existe no destino. Movendo para o subdiretório...")
-            shutil.move(caminho_destino, caminho_subdestino)
-
-        # Agora move o novo arquivo da origem para o destino
+            nome, ext = os.path.splitext(novo_nome)
+            novo_nome_sub = f"{nome}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+            caminho_subdestino = os.path.join(caminho_subdiretorio, novo_nome_sub)
+            print(f"Arquivo {novo_nome} já existe no destino. Renomeando e movendo para o subdiretório...")
+            os.rename(caminho_destino, caminho_subdestino)
+        
         if os.path.exists(caminho_origem):
             shutil.move(caminho_origem, caminho_destino)
         else:
-            print(f"Arquivo não encontrado na origem: {arquivo}")
+            print(f"Arquivo não encontrado na origem: {novo_nome}")
 
 def executar_rotina():
     try:
