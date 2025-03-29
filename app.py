@@ -209,40 +209,27 @@ def renomear_arquivos(arquivos, diretorio_origem, arquivos_novos):
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     print("Movendo arquivos de histórico...")
-    
+
     if not os.path.exists(diretorio_destino):
         os.makedirs(diretorio_destino)
-    
+
     caminho_subdiretorio = os.path.join(diretorio_destino, subdiretorio)
     if not os.path.exists(caminho_subdiretorio):
         os.makedirs(caminho_subdiretorio)
-    
-    arquivos_no_destino = [f for f in os.listdir(diretorio_destino) if os.path.isfile(os.path.join(diretorio_destino, f))]
-    
-    if arquivos_no_destino:
-        print("Arquivos encontrados no diretório de destino. Renomeando e movendo para o subdiretório...")
-        arquivos_renomeados = renomear_arquivos(arquivos_no_destino, diretorio_destino, arquivos)
-        
-        for original, novo_nome in arquivos_renomeados.items():
-            caminho_origem = os.path.join(diretorio_destino, original)
-            caminho_destino = os.path.join(caminho_subdiretorio, novo_nome)
-            if os.path.exists(caminho_origem):
-                shutil.move(caminho_origem, caminho_destino)
-            else:
-                print(f"Arquivo não encontrado para renomear e mover: {original}")
-    
-    if not arquivos_no_destino:
-        print("Nenhum arquivo encontrado no diretório de destino. Movendo novos arquivos sem renomear...")
-    
+
     for arquivo in arquivos:
         caminho_origem = os.path.join(diretorio_origem, arquivo)
         caminho_destino = os.path.join(diretorio_destino, arquivo)
-        
+        caminho_subdestino = os.path.join(caminho_subdiretorio, arquivo)
+
+        # Se o arquivo já existe no destino, mova-o para o subdiretório
+        if os.path.exists(caminho_destino):
+            print(f"Arquivo {arquivo} já existe no destino. Movendo para o subdiretório...")
+            shutil.move(caminho_destino, caminho_subdestino)
+
+        # Agora move o novo arquivo da origem para o destino
         if os.path.exists(caminho_origem):
-            if not os.path.exists(caminho_destino):
-                shutil.move(caminho_origem, caminho_destino)
-            else:
-                print(f"Arquivo já existe no destino e não será movido: {arquivo}")
+            shutil.move(caminho_origem, caminho_destino)
         else:
             print(f"Arquivo não encontrado na origem: {arquivo}")
 
