@@ -288,5 +288,4 @@ while True:
     agora = datetime.now().hour
     if 8 <= agora < 22:
         schedule.run_pending()  # Executa as tarefas agendadas
-        executar_rotina()
     time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
