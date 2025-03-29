@@ -221,7 +221,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     
     if arquivos_no_destino:
         print("Arquivos encontrados no diretório de destino. Renomeando e movendo para o subdiretório...")
-        arquivos_renomeados = renomear_arquivos(arquivos_no_destino, diretorio_destino)
+        arquivos_renomeados = renomear_arquivos(arquivos_no_destino, diretorio_destino, arquivos)
         
         for original, novo_nome in arquivos_renomeados.items():
             caminho_origem = os.path.join(diretorio_destino, original)
