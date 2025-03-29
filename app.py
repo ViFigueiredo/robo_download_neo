@@ -190,60 +190,48 @@ def logout(driver):
     esperar_elemento(driver, option_logout_xpath)
     clicar_elemento(driver, option_logout_xpath)
 
-def renomear_arquivos(arquivos, diretorio_origem):
-    print("Renomeando arquivos...")
-    data_atual = datetime.now().strftime('%Y%m%d_%H%M%S')
-    arquivos_renomeados = {}
+def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
+    print("Iniciando movimentação segura de arquivos...")
+    
+    # Garantir estrutura de diretórios
+    os.makedirs(diretorio_destino, exist_ok=True)
+    historico_path = os.path.join(diretorio_destino, subdiretorio)
+    os.makedirs(historico_path, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     for arquivo in arquivos:
-        caminho_original = os.path.join(diretorio_origem, arquivo)
-        if os.path.exists(caminho_original):
+        dest_file = os.path.join(diretorio_destino, arquivo)
+        orig_file = os.path.join(diretorio_origem, arquivo)
+        
+        # Gerenciar conflitos no destino
+        if os.path.exists(dest_file):
+            print(f"💥 Conflito detectado: {arquivo}")
+            
+            # Gerar novo nome único
             nome, ext = os.path.splitext(arquivo)
-            novo_nome = f"{nome}_{data_atual}{ext}"
-            novo_caminho = os.path.join(diretorio_origem, novo_nome)
-            os.rename(caminho_original, novo_caminho)
-            arquivos_renomeados[arquivo] = novo_nome
+            nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
+            
+            # Mover arquivo conflitante para histórico
+            shutil.move(
+                dest_file,
+                os.path.join(historico_path, nome_salvo)
+            )
+            print(f"✅ Backup criado: {nome_salvo}")
+        
+        # Mover arquivo original (se existir)
+        if os.path.exists(orig_file):
+            shutil.move(orig_file, dest_file)
+            print(f"➡️ {arquivo} movido para destino")
         else:
-            print(f"Arquivo não encontrado: {arquivo}")
-    
-    return arquivos_renomeados
+            print(f"⚠️ Arquivo ausente: {orig_file}")
 
-def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
-    print("Movendo arquivos de histórico...")
-    
-    if not os.path.exists(diretorio_destino):
-        os.makedirs(diretorio_destino)
-    
-    caminho_subdiretorio = os.path.join(diretorio_destino, subdiretorio)
-    if not os.path.exists(caminho_subdiretorio):
-        os.makedirs(caminho_subdiretorio)
-    
-    arquivos_renomeados = renomear_arquivos(arquivos, diretorio_origem)
-    
-    for arquivo, novo_nome in arquivos_renomeados.items():
-        caminho_origem = os.path.join(diretorio_origem, novo_nome)
-        caminho_destino = os.path.join(diretorio_destino, novo_nome)
-        caminho_subdestino = os.path.join(caminho_subdiretorio, novo_nome)
-        
-        if not os.path.exists(caminho_origem):
-            print(f"Arquivo {novo_nome} não encontrado na origem. Verificando no destino...")
-            if os.path.exists(caminho_destino):
-                print(f"Arquivo {novo_nome} já existe no destino. Não será movido para o subdiretório.")
-            continue
-        
-        if os.path.exists(caminho_destino):
-            nome, ext = os.path.splitext(novo_nome)
-            novo_nome_sub = f"{nome}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-            caminho_subdestino = os.path.join(caminho_subdiretorio, novo_nome_sub)
-            print(f"Arquivo {novo_nome} já existe no destino. Renomeando e movendo para o subdiretório...")
-            os.rename(caminho_destino, caminho_subdestino)
-        
-        shutil.move(caminho_origem, caminho_destino)
+    print("Operação concluída com segurança!\n")
 
 def executar_rotina():
     try:
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f"Iniciando em {data_atual}")
+        print(f"Iniciando execução em {data_atual}")
 
         driver = iniciar_driver()
         login(driver)
@@ -269,8 +257,8 @@ def executar_rotina():
         driver.quit()
         time.sleep(10)
 
-        sysUser = os.getenv("USERNAME")
-        dirOrigem = f"C:/Users/{sysUser}/Downloads"
+        sysUser  = os.getenv("USERNAME")
+        dirOrigem = f"C:/Users/{sysUser }/Downloads"
         dirDestino = "N:"
         subDiretorio = "histórico"
         nomeArquivo1 = "Exportacao Atividade.xlsx"
@@ -281,18 +269,25 @@ def executar_rotina():
 
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"Finalizado em {data_atual}")
+        print("⏳ Agendando a execução a cada 30 minutos...")
 
     except Exception as e:
-        print(e) # Registra o erro no log
+        print(f"Erro: {e}")  # Registra o erro no log
 
-# Agendar a função para rodar a cada 30 minutos dentro do intervalo
-print("Aguardando a próxima execução...")
-schedule.every(30).minutes.do(executar_rotina)
-# executar_rotina()
+# Função para agendar a execução
+def agendar_execucao():
+    schedule.every(30).minutes.do(executar_rotina)
 
+# Iniciar o agendamento
+agendar_execucao()
+
+# Executar a rotina uma vez antes de agendar
+executar_rotina()
 
 while True:
     agora = datetime.now().hour
     if 8 <= agora < 22:
         schedule.run_pending()  # Executa as tarefas agendadas
+        if not schedule.get_jobs():  # Verifica se não há tarefas agendadas
+            print("Aguardando a próxima execução...")
     time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
