@@ -225,6 +225,12 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
         caminho_destino = os.path.join(diretorio_destino, novo_nome)
         caminho_subdestino = os.path.join(caminho_subdiretorio, novo_nome)
         
+        if not os.path.exists(caminho_origem):
+            print(f"Arquivo {novo_nome} não encontrado na origem. Verificando no destino...")
+            if os.path.exists(caminho_destino):
+                print(f"Arquivo {novo_nome} já existe no destino. Não será movido para o subdiretório.")
+            continue
+        
         if os.path.exists(caminho_destino):
             nome, ext = os.path.splitext(novo_nome)
             novo_nome_sub = f"{nome}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
@@ -232,10 +238,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
             print(f"Arquivo {novo_nome} já existe no destino. Renomeando e movendo para o subdiretório...")
             os.rename(caminho_destino, caminho_subdestino)
         
-        if os.path.exists(caminho_origem):
-            shutil.move(caminho_origem, caminho_destino)
-        else:
-            print(f"Arquivo não encontrado na origem: {novo_nome}")
+        shutil.move(caminho_origem, caminho_destino)
 
 def executar_rotina():
     try:
