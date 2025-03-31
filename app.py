@@ -20,7 +20,7 @@ password = os.getenv("SYS_PASSWORD")
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    options.add_argument("--headless")
+    # options.add_argument("--headless")
     driver = webdriver.Firefox(options=options)
     return driver
 
@@ -143,8 +143,11 @@ def exportProducao(driver):
     esperar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
 
-    data_inicial = (datetime.now() - timedelta(days=90)).strftime("%d/%m/%Y")
-    texto = "Painel de Produção Vivo"   
+    data_atual = datetime.now() # Obtém a data atual
+    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
+    data_inicial_ajustada = data_90_dias_atras.replace(day=1) # Define o dia como 1
+    data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
+    texto = "Painel de Produção Vivo"
 
     selecionar_data(driver, '//*[@id="input-vaadin-date-picker-53"]', data_inicial)
     selecionar_texto(driver, '//*[@id="input-vaadin-combo-box-56"]', texto)
