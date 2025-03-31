@@ -20,7 +20,7 @@ password = os.getenv("SYS_PASSWORD")
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    # options.add_argument("--headless")
+    options.add_argument("--headless")
     driver = webdriver.Firefox(options=options)
     return driver
 
