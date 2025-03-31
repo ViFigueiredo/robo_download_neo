@@ -194,41 +194,28 @@ def logout(driver):
     clicar_elemento(driver, option_logout_xpath)
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
-    print("Iniciando movimentação segura de arquivos...")
-    
-    # Garantir estrutura de diretórios
-    os.makedirs(diretorio_destino, exist_ok=True)
+    print("Iniciando movimentação segura de arquivos...")    
+    os.makedirs(diretorio_destino, exist_ok=True) # Garantir estrutura de diretórios
     historico_path = os.path.join(diretorio_destino, subdiretorio)
     os.makedirs(historico_path, exist_ok=True)
-    
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
     for arquivo in arquivos:
         dest_file = os.path.join(diretorio_destino, arquivo)
-        orig_file = os.path.join(diretorio_origem, arquivo)
-        
-        # Gerenciar conflitos no destino
-        if os.path.exists(dest_file):
-            print(f"💥 Conflito detectado: {arquivo}")
-            
-            # Gerar novo nome único
-            nome, ext = os.path.splitext(arquivo)
-            nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
-            
-            # Mover arquivo conflitante para histórico
-            shutil.move(
-                dest_file,
-                os.path.join(historico_path, nome_salvo)
-            )
-            print(f"✅ Backup criado: {nome_salvo}")
-        
-        # Mover arquivo original (se existir)
-        if os.path.exists(orig_file):
-            shutil.move(orig_file, dest_file)
+        orig_file = os.path.join(diretorio_origem, arquivo)        
+
+        if os.path.exists(orig_file): # Verifica se o arquivo de origem existe
+            if os.path.exists(dest_file): # Gerenciar conflitos no destino
+                print(f"💥 Conflito detectado: {arquivo}")
+                nome, ext = os.path.splitext(arquivo) # Gerar novo nome único
+                nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
+                shutil.move(dest_file, os.path.join(historico_path, nome_salvo)) # Mover arquivo conflitante para histórico
+                print(f"✅ Backup criado: {nome_salvo}")            
+
+            shutil.move(orig_file, dest_file) # Mover arquivo original para o destino
             print(f"➡️ {arquivo} movido para destino")
         else:
             print(f"⚠️ Arquivo ausente: {orig_file}")
-
     print("Operação concluída com segurança!\n")
 
 def executar_rotina():
