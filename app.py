@@ -117,11 +117,11 @@ def exportAtividadesStatus(driver):
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     
-    mes_atual = datetime.now().month
-    ano_atual = datetime.now().year
-    data_inicial = f"01/{mes_atual}/{ano_atual}"
+    data_atual = datetime.now() # Obtém a data atual
+    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
+    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-154"]', data_inicial)
     clicar_elemento(driver, '//*[@id="btnPesquisar"]')
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
 
@@ -130,11 +130,11 @@ def exportAtividades(driver):
     esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
     
-    mes_atual = datetime.now().month
-    ano_atual = datetime.now().year
-    data_inicial = f"01/{mes_atual}/{ano_atual}"
+    data_atual = datetime.now() # Obtém a data atual
+    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
+    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-154"]', data_inicial)
     clicar_elemento(driver, '//*[@id="btnPesquisar"]')
     realizar_download_atividades(driver, '//*[contains(@id, "btnExportarAtividades")]')
 
@@ -149,9 +149,9 @@ def exportProducao(driver):
     data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     texto = "Painel de Produção Vivo"
 
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-53"]', data_inicial)
-    selecionar_texto(driver, '//*[@id="input-vaadin-combo-box-56"]', texto)
-    clicar_elemento(driver, '//*[@id="input-vaadin-radio-button-71"]')
+    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-49"]', data_inicial)
+    selecionar_texto(driver, '//*[@id="input-vaadin-combo-box-52"]', texto)
+    clicar_elemento(driver, '//*[@id="input-vaadin-radio-button-67"]')
     clicar_elemento(driver, "//vaadin-button[contains(text(), 'Pesquisar') and @role='button']")
     realizar_download_producao(driver)
     fechar_modal(driver)
