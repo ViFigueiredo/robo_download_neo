@@ -127,9 +127,9 @@ def exportAtividadesStatus(driver):
     esperar_elemento(driver, XPATHS['atividades']['panel'])
     clicar_elemento(driver, XPATHS['atividades']['panel'])
     
-    mes_atual = datetime.now().month
-    ano_atual = datetime.now().year
-    data_inicial = f"01/{mes_atual}/{ano_atual}"
+    data_atual = datetime.now() # Obtém a data atual
+    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
+    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
     selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
     clicar_elemento(driver, XPATHS['atividades']['search_button'])
@@ -140,9 +140,9 @@ def exportAtividades(driver):
     esperar_elemento(driver, XPATHS['atividades']['panel'])
     clicar_elemento(driver, XPATHS['atividades']['panel'])
     
-    mes_atual = datetime.now().month
-    ano_atual = datetime.now().year
-    data_inicial = f"01/{mes_atual}/{ano_atual}"
+    data_atual = datetime.now() # Obtém a data atual
+    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
+    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
     selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
     clicar_elemento(driver, XPATHS['atividades']['search_button'])
