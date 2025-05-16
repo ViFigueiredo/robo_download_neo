@@ -1,4 +1,4 @@
-import requests, time, os, shutil, schedule
+import requests, time, os, shutil, schedule, json, re
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
@@ -11,16 +11,21 @@ from dotenv import load_dotenv
 # Carrega as variáveis do arquivo .env
 load_dotenv()
 
+# Carrega os XPaths do arquivo map.json
+with open('map.json', 'r') as f:
+    XPATHS = json.load(f)
+
 # Acessando as variáveis
 url = os.getenv("SYS_URL")
 username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
+secret_otp = os.getenv("SYS_SECRET_OTP")
 
 
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    options.add_argument("--headless")
+    # options.add_argument("--headless")
     driver = webdriver.Firefox(options=options)
     return driver
 
@@ -50,7 +55,7 @@ def gerar_otp():
     print("Gerando OTP...")
     response = requests.post(
         'http://localhost:8000/generate_otp', 
-        json={"secret": "GZRDMZTGMFSWILLDGMZTALJUGQ2DQLJYGQYWMLJQGA4GCMZWGBRWGMZUMQ======"}
+        json={"secret": secret_otp}
     )
     if response.status_code == 200:
         return response.json().get("otp")
@@ -78,70 +83,75 @@ def selecionar_texto(driver, xpath, text):
 def realizar_download_atividades(driver, button_xpath):
     print("Realizando download de atividades...")
     clicar_elemento(driver, button_xpath)
-    esperar_elemento(driver, '//*[contains(@id, "input-vaadin-number-field-")]')
-    
-    xpath_codigo = '//vaadin-vertical-layout//div/span/b[not(contains(text(), "EXPORTAR")) and normalize-space()]'
-    codigo_elemento = esperar_elemento(driver, xpath_codigo)
+    esperar_elemento(driver, XPATHS['atividades']['input_code_field'])
+
+    codigo_elemento = esperar_elemento(driver, XPATHS['atividades']['code_field'])
     codigo_texto = codigo_elemento.text
-    
-    inserir_texto(driver, "//vaadin-number-field//input[contains(@id, 'input-vaadin-number-field-')]", int(codigo_texto))
-    clicar_elemento(driver, "//vaadin-button[text()='Sim, Tenho certeza']")
-    esperar_elemento(driver, "//vaadin-dialog-overlay[@id='overlay']//a[@href]")
+    # Extrair o número do texto usando regex
+    match = re.search(r"(\d+)", codigo_texto)
+    if match:
+        numero_atividades = int(match.group(1))
+    else:
+        raise ValueError(f"Não foi possível extrair o número de atividades do texto: {codigo_texto}")
+
+    inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_atividades)
+    clicar_elemento(driver, XPATHS['atividades']['confirm_button'])
+    esperar_elemento(driver, XPATHS['atividades']['download_link'])
     time.sleep(10)
-    clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
-    clicar_elemento(driver, "//vaadin-button[text()='Fechar']")
+    clicar_elemento(driver, XPATHS['atividades']['download_button'])
+    clicar_elemento(driver, XPATHS['atividades']['close_button'])
     fechar_modal(driver)
-    print("Atividades baixadas com sucesso sucesso.")
+    print("Atividades baixadas com sucesso.")
 
 def realizar_download_producao(driver):
     print("Realizando download de produção...")
-    esperar_elemento(driver, "//vaadin-dialog-overlay[@id='overlay']//a[@href]", 300)
+    esperar_elemento(driver, XPATHS['producao']['download_link'], 300)
     time.sleep(10)
-    clicar_elemento(driver, "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]")
-    clicar_elemento(driver, "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button")
+    clicar_elemento(driver, XPATHS['producao']['download_button'])
+    clicar_elemento(driver, XPATHS['producao']['close_button'])
     print("Produção baixado com sucesso.")
 
 def fechar_modal(driver):
     # print("Fechando modal...")
     try:
-        overlay = driver.find_element(By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")
+        overlay = driver.find_element(By.XPATH, XPATHS['common']['modal_overlay'])
         if overlay.is_displayed():
             driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
-            WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, "//vaadin-dialog-overlay[contains(@id, 'overlay')]")))
+            WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, XPATHS['common']['modal_overlay'])))
             # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
 
 def exportAtividadesStatus(driver):
     print("Exportando atividades<>status...")
-    esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
-    clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
+    esperar_elemento(driver, XPATHS['atividades']['panel'])
+    clicar_elemento(driver, XPATHS['atividades']['panel'])
     
     mes_atual = datetime.now().month
     ano_atual = datetime.now().year
     data_inicial = f"01/{mes_atual}/{ano_atual}"
     
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
-    clicar_elemento(driver, '//*[@id="btnPesquisar"]')
-    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarStatus")]')
+    selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
+    clicar_elemento(driver, XPATHS['atividades']['search_button'])
+    realizar_download_atividades(driver, XPATHS['atividades']['export_status_button'])
 
 def exportAtividades(driver):
     print("Exportando atividades...")
-    esperar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
-    clicar_elemento(driver, '//*[contains(@id, "Painel_Atividades")]')
+    esperar_elemento(driver, XPATHS['atividades']['panel'])
+    clicar_elemento(driver, XPATHS['atividades']['panel'])
     
     mes_atual = datetime.now().month
     ano_atual = datetime.now().year
     data_inicial = f"01/{mes_atual}/{ano_atual}"
     
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-158"]', data_inicial)
-    clicar_elemento(driver, '//*[@id="btnPesquisar"]')
-    realizar_download_atividades(driver, '//*[contains(@id, "btnExportarAtividades")]')
+    selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
+    clicar_elemento(driver, XPATHS['atividades']['search_button'])
+    realizar_download_atividades(driver, XPATHS['atividades']['export_atividades_button'])
 
 def exportProducao(driver):
     print("Exportando produção...")
-    esperar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
-    clicar_elemento(driver, '//*[contains(@id, "Painel_Produção")]')
+    esperar_elemento(driver, XPATHS['producao']['panel'])
+    clicar_elemento(driver, XPATHS['producao']['panel'])
 
     data_atual = datetime.now() # Obtém a data atual
     data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
@@ -149,32 +159,32 @@ def exportProducao(driver):
     data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     texto = "Painel de Produção Vivo"
 
-    selecionar_data(driver, '//*[@id="input-vaadin-date-picker-53"]', data_inicial)
-    selecionar_texto(driver, '//*[@id="input-vaadin-combo-box-56"]', texto)
-    clicar_elemento(driver, '//*[@id="input-vaadin-radio-button-71"]')
-    clicar_elemento(driver, "//vaadin-button[contains(text(), 'Pesquisar') and @role='button']")
+    selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial)
+    selecionar_texto(driver, XPATHS['producao']['combo_box'], texto)
+    clicar_elemento(driver, XPATHS['producao']['radio_button'])
+    clicar_elemento(driver, XPATHS['producao']['search_button'])
     realizar_download_producao(driver)
     fechar_modal(driver)
 
 def login(driver):
     acessar_pagina(driver, url)
     print("Realizando login...")
-    esperar_elemento(driver, '//*[contains(@id, "input-vaadin-text-field-")]')
+    esperar_elemento(driver, XPATHS['login']['username_field'])
     
-    inserir_texto(driver, '//*[contains(@id, "input-vaadin-text-field-")]', username)
-    inserir_texto(driver, '//*[contains(@id, "input-vaadin-password-field-")]', password)
+    inserir_texto(driver, XPATHS['login']['username_field'], username)
+    inserir_texto(driver, XPATHS['login']['password_field'], password)
     
     while True:
         otp = gerar_otp()
-        clicar_elemento(driver, '//*[contains(@id, "input-vaadin-radio-button-")]')
-        clicar_elemento(driver, '//*[@id="input-vaadin-text-field-19"]')
-        inserir_texto(driver, '//*[@id="input-vaadin-text-field-19"]', otp)
-        clicar_elemento(driver, '//*[contains(@id, "btnLogar")]')
+        clicar_elemento(driver, XPATHS['login']['otp_radio'])
+        clicar_elemento(driver, XPATHS['login']['otp_field'])
+        inserir_texto(driver, XPATHS['login']['otp_field'], otp)
+        clicar_elemento(driver, XPATHS['login']['login_button'])
         
         time.sleep(2) 
         
         try:
-            mensagem = driver.find_element(By.XPATH, '/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/div/span/center').text
+            mensagem = driver.find_element(By.XPATH, XPATHS['login']['error_message']).text
             
             if mensagem in ["Usuário não encontrado", "Código autenticador inválido", "Usuário inexistente ou senha inválida"]:
                 print("Erro detectado, tentando novamente...")
@@ -186,12 +196,10 @@ def login(driver):
 
 def logout(driver):
     print("Realizando logout...")
-    btn_logout_xpath = "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]"
-    option_logout_xpath = "/html/body/vaadin-menu-bar-overlay/vaadin-menu-bar-list-box/vaadin-menu-bar-item[4]"
-    esperar_elemento(driver, btn_logout_xpath)
-    clicar_elemento(driver, btn_logout_xpath)
-    esperar_elemento(driver, option_logout_xpath)
-    clicar_elemento(driver, option_logout_xpath)
+    esperar_elemento(driver, XPATHS['logout']['logout_button'])
+    clicar_elemento(driver, XPATHS['logout']['logout_button'])
+    esperar_elemento(driver, XPATHS['logout']['logout_option'])
+    clicar_elemento(driver, XPATHS['logout']['logout_option'])
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     print("Iniciando movimentação segura de arquivos...")    
