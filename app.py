@@ -8,9 +8,28 @@ from selenium.webdriver.firefox.options import Options
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from selenium.webdriver.common.action_chains import ActionChains
+import logging
+
+# Configuração de logging
+logging.basicConfig(
+    filename='robo_download.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# Função para notificação (placeholder)
+def send_notification(msg):
+    # Aqui você pode implementar envio por e-mail, Telegram, etc.
+    logger.warning(f'NOTIFICAÇÃO: {msg}')
 
 # Carrega as variáveis do arquivo .env
 load_dotenv()
+
+# Timeouts configuráveis
+TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
+RETRIES_DOWNLOAD = int(os.getenv('RETRIES_DOWNLOAD', '3'))
 
 # Carrega os XPaths do arquivo map.json
 with open('map.json', 'r') as f:
@@ -27,7 +46,7 @@ destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    # options.add_argument("--headless")
+    options.add_argument("--headless")
     # Definir diretório de download para a pasta Downloads do usuário
     user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     os.makedirs(user_download_dir, exist_ok=True)
@@ -118,14 +137,23 @@ def baixar_arquivo_com_cookies(driver, url, caminho_destino):
     s = requests.Session()
     for cookie in cookies:
         s.cookies.set(cookie['name'], cookie['value'])
-    resposta = s.get(url, stream=True)
-    if resposta.status_code == 200:
-        with open(caminho_destino, 'wb') as f:
-            for chunk in resposta.iter_content(chunk_size=8192):
-                f.write(chunk)
-        print(f"Arquivo salvo em: {caminho_destino}")
-    else:
-        print(f"Erro ao baixar arquivo: {resposta.status_code}")
+    for tentativa in range(1, RETRIES_DOWNLOAD+1):
+        try:
+            logger.info(f'Tentando baixar arquivo: {url} (tentativa {tentativa})')
+            resposta = s.get(url, stream=True, timeout=TIMEOUT_DOWNLOAD)
+            if resposta.status_code == 200:
+                with open(caminho_destino, 'wb') as f:
+                    for chunk in resposta.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logger.info(f"Arquivo salvo em: {caminho_destino}")
+                return True
+            else:
+                logger.error(f'Erro ao baixar arquivo: {resposta.status_code}')
+        except Exception as e:
+            logger.error(f'Erro ao baixar arquivo: {e}')
+        time.sleep(2)
+    send_notification(f'Falha ao baixar arquivo após {RETRIES_DOWNLOAD} tentativas: {url}')
+    return False
 
 def realizar_download_atividades(driver, button_xpath):
     print("Realizando download de atividades...")
@@ -283,6 +311,7 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
 def executar_rotina():
     try:
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"Iniciando execução em {data_atual}")
         print(f"Iniciando execução em {data_atual}")
 
         # Limpar a pasta de downloads antes de iniciar os downloads
@@ -328,16 +357,20 @@ def executar_rotina():
 
         # Listar arquivos encontrados na pasta de download
         print("Arquivos encontrados na pasta de download:", os.listdir(dirOrigem))
+        logger.info(f"Arquivos encontrados na pasta de download: {os.listdir(dirOrigem)}")
 
         # Mover todos arquivos .xlsx encontrados
         arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
         mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
 
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"Finalizado em {data_atual}")
         print(f"Finalizado em {data_atual}")
         print("⏳ Agendando a execução a cada 30 minutos...")
 
     except Exception as e:
+        logger.error(f"Erro: {e}")
+        send_notification(f"Erro crítico na execução: {e}")
         print(f"Erro: {e}")  # Registra o erro no log
 
 # Função para agendar a execução
