@@ -41,22 +41,51 @@ username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 secret_otp = os.getenv("SYS_SECRET_OTP")
 destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
+browser = os.getenv("BROWSER", "firefox").lower()
 
 
 def iniciar_driver():
-    print("Iniciando driver do navegador...")
-    options = Options()
-    options.add_argument("--headless")
-    # Definir diretório de download para a pasta Downloads do usuário
+    print(f"Iniciando driver do navegador... ({browser})")
     user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     os.makedirs(user_download_dir, exist_ok=True)
-    profile = webdriver.FirefoxProfile()
-    profile.set_preference("browser.download.folderList", 2)
-    profile.set_preference("browser.download.dir", user_download_dir)
-    profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,application/vnd.ms-excel")
-    profile.set_preference("pdfjs.disabled", True)
-    options.profile = profile
-    driver = webdriver.Firefox(options=options)
+    driver = None
+    if browser == "firefox":
+        from selenium.webdriver.firefox.options import Options as FirefoxOptions
+        options = FirefoxOptions()
+        options.add_argument("--headless")
+        profile = webdriver.FirefoxProfile()
+        profile.set_preference("browser.download.folderList", 2)
+        profile.set_preference("browser.download.dir", user_download_dir)
+        profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,application/vnd.ms-excel")
+        profile.set_preference("pdfjs.disabled", True)
+        options.profile = profile
+        driver = webdriver.Firefox(options=options)
+    elif browser == "chrome":
+        from selenium.webdriver.chrome.options import Options as ChromeOptions
+        options = ChromeOptions()
+        options.add_argument("--headless=new")
+        prefs = {
+            "download.default_directory": user_download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        options.add_experimental_option("prefs", prefs)
+        driver = webdriver.Chrome(options=options)
+    elif browser == "edge":
+        from selenium.webdriver.edge.options import Options as EdgeOptions
+        options = EdgeOptions()
+        options.add_argument("--headless=new")
+        prefs = {
+            "download.default_directory": user_download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        options.add_experimental_option("prefs", prefs)
+        driver = webdriver.Edge(options=options)
+    else:
+        raise ValueError(f"Navegador não suportado: {browser}")
     return driver
 
 def acessar_pagina(driver, url):
