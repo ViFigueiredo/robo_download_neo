@@ -7,6 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from selenium.webdriver.common.action_chains import ActionChains
 
 # Carrega as variáveis do arquivo .env
 load_dotenv()
@@ -20,12 +21,22 @@ url = os.getenv("SYS_URL")
 username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 secret_otp = os.getenv("SYS_SECRET_OTP")
+destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
 
 
 def iniciar_driver():
     print("Iniciando driver do navegador...")
     options = Options()
-    options.add_argument("--headless")
+    # options.add_argument("--headless")
+    # Definir diretório de download para a pasta Downloads do usuário
+    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    os.makedirs(user_download_dir, exist_ok=True)
+    profile = webdriver.FirefoxProfile()
+    profile.set_preference("browser.download.folderList", 2)
+    profile.set_preference("browser.download.dir", user_download_dir)
+    profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,application/vnd.ms-excel")
+    profile.set_preference("pdfjs.disabled", True)
+    options.profile = profile
     driver = webdriver.Firefox(options=options)
     return driver
 
@@ -51,10 +62,17 @@ def clicar_elemento(driver, xpath):
     # print(f"Clicando no elemento...")
     driver.find_element(By.XPATH, xpath).click()
 
+def clicar_elemento_real(driver, xpath):
+    elemento = WebDriverWait(driver, 30).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    )
+    driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+    ActionChains(driver).move_to_element(elemento).click().perform()
+
 def gerar_otp():
     print("Gerando OTP...")
     response = requests.post(
-        'http://localhost:8001/generate_otp', 
+        'http://192.168.0.129:8001/generate_otp', 
         json={"secret": secret_otp}
     )
     if response.status_code == 200:
@@ -80,6 +98,35 @@ def selecionar_texto(driver, xpath, text):
     time.sleep(5)
     driver.find_element(By.XPATH, xpath).send_keys(Keys.ENTER)
 
+def esperar_download_pronto(driver, xpath, timeout=60):
+    """Espera até o link de download estar realmente pronto (href válido)."""
+    for _ in range(timeout):
+        try:
+            elemento = driver.find_element(By.XPATH, xpath)
+            href = elemento.get_attribute("href")
+            if href and href.endswith(".xlsx"):
+                print(f"Link pronto no DOM: {href}")
+                return elemento
+        except Exception:
+            pass
+        time.sleep(1)
+    raise Exception("Link de download não ficou pronto a tempo.")
+
+def baixar_arquivo_com_cookies(driver, url, caminho_destino):
+    import requests
+    cookies = driver.get_cookies()
+    s = requests.Session()
+    for cookie in cookies:
+        s.cookies.set(cookie['name'], cookie['value'])
+    resposta = s.get(url, stream=True)
+    if resposta.status_code == 200:
+        with open(caminho_destino, 'wb') as f:
+            for chunk in resposta.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"Arquivo salvo em: {caminho_destino}")
+    else:
+        print(f"Erro ao baixar arquivo: {resposta.status_code}")
+
 def realizar_download_atividades(driver, button_xpath):
     print("Realizando download de atividades...")
     clicar_elemento(driver, button_xpath)
@@ -96,9 +143,12 @@ def realizar_download_atividades(driver, button_xpath):
 
     inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_atividades)
     clicar_elemento(driver, XPATHS['atividades']['confirm_button'])
-    esperar_elemento(driver, XPATHS['atividades']['download_link'])
-    time.sleep(10)
-    clicar_elemento(driver, XPATHS['atividades']['download_button'])
+    elemento_download = esperar_download_pronto(driver, XPATHS['atividades']['download_link'])
+    url_download = elemento_download.get_attribute('href')
+    nome_arquivo = elemento_download.text.strip() or 'Exportacao Atividades.xlsx'
+    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    caminho_destino = os.path.join(user_download_dir, nome_arquivo)
+    baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
     clicar_elemento(driver, XPATHS['atividades']['close_button'])
     fechar_modal(driver)
     print("Atividades baixadas com sucesso.")
@@ -106,8 +156,12 @@ def realizar_download_atividades(driver, button_xpath):
 def realizar_download_producao(driver):
     print("Realizando download de produção...")
     esperar_elemento(driver, XPATHS['producao']['download_link'], 300)
-    time.sleep(10)
-    clicar_elemento(driver, XPATHS['producao']['download_button'])
+    elemento_download = esperar_download_pronto(driver, XPATHS['producao']['download_link'])
+    url_download = elemento_download.get_attribute('href')
+    nome_arquivo = elemento_download.text.strip() or 'ExportacaoProducao.xlsx'
+    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    caminho_destino = os.path.join(user_download_dir, nome_arquivo)
+    baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
     clicar_elemento(driver, XPATHS['producao']['close_button'])
     print("Produção baixado com sucesso.")
 
@@ -231,39 +285,53 @@ def executar_rotina():
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"Iniciando execução em {data_atual}")
 
+        # Limpar a pasta de downloads antes de iniciar os downloads
+        # (opcional: pode remover esta limpeza se não quiser apagar arquivos do usuário)
+        user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        # Limpar arquivos antigos na pasta Downloads do usuário que contenham palavras-chave
+        palavras_chave = ["atividades", "status", "produção"]
+        for f in os.listdir(user_download_dir):
+            if any(palavra in f.lower() for palavra in palavras_chave):
+                file_path = os.path.join(user_download_dir, f)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"Arquivo antigo removido: {f}")
+
         driver = iniciar_driver()
         login(driver)
         exportAtividadesStatus(driver)
-        logout(driver)
-        time.sleep(5)
-        driver.quit()
+        # logout(driver)
+        # time.sleep(5)
+        # driver.quit()
         time.sleep(10)
 
-        driver = iniciar_driver()
-        login(driver)
+        # driver = iniciar_driver()
+        # login(driver)
         exportAtividades(driver)
-        logout(driver)
-        time.sleep(5)
-        driver.quit()
+        # logout(driver)
+        # time.sleep(5)
+        # driver.quit()
         time.sleep(10)
 
-        driver = iniciar_driver()
-        login(driver)
+        # driver = iniciar_driver()
+        # login(driver)
         exportProducao(driver)
-        logout(driver)
-        time.sleep(5)
+        # logout(driver)
+        # time.sleep(5)
         driver.quit()
         time.sleep(10)
 
-        sysUser  = os.getenv("USERNAME")
-        dirOrigem = f"C:/Users/{sysUser }/Downloads"
-        dirDestino = "N:"
+        dirOrigem = user_download_dir
+        dirDestino = destino_final_dir
+        os.makedirs(dirDestino, exist_ok=True)
         subDiretorio = "histórico"
-        nomeArquivo1 = "Exportacao Atividade.xlsx"
-        nomeArquivo2 = "Exportacao Status.xlsx"
-        nomeArquivo3 = "ExportacaoProducao.xlsx"
 
-        mover_arquivos(dirOrigem, [nomeArquivo1, nomeArquivo2, nomeArquivo3], dirDestino, subDiretorio)
+        # Listar arquivos encontrados na pasta de download
+        print("Arquivos encontrados na pasta de download:", os.listdir(dirOrigem))
+
+        # Mover todos arquivos .xlsx encontrados
+        arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
+        mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
 
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"Finalizado em {data_atual}")
