@@ -7,6 +7,23 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import sys
+
+if getattr(sys, 'frozen', False):
+    # Executável (PyInstaller): buscar .env na mesma pasta do .exe
+    base_path = os.path.dirname(sys.executable)
+else:
+    # Script Python normal
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+dotenv_path = os.path.join(base_path, ".env")
+print("DEBUG DOTENV PATH:", dotenv_path)
+with open(dotenv_path) as f:
+    print("DEBUG .env CONTENTS:\n", f.read())
+load_dotenv(dotenv_path, override=True)
+
+# Debug: mostrar valor da variável BROWSER
+print("DEBUG BROWSER:", os.getenv("BROWSER"))
 from selenium.webdriver.common.action_chains import ActionChains
 import logging
 
@@ -25,14 +42,15 @@ def send_notification(msg):
     logger.warning(f'NOTIFICAÇÃO: {msg}')
 
 # Carrega as variáveis do arquivo .env
-load_dotenv()
+# load_dotenv() # Removido, pois o .env agora é carregado globalmente
 
 # Timeouts configuráveis
 TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
 RETRIES_DOWNLOAD = int(os.getenv('RETRIES_DOWNLOAD', '3'))
 
-# Carrega os XPaths do arquivo map.json
-with open('map.json', 'r') as f:
+# Carrega os XPaths do arquivo map.json ou map_relative.json se existir
+map_file = 'map_relative.json' if os.path.exists('map_relative.json') else 'map.json'
+with open(map_file, 'r') as f:
     XPATHS = json.load(f)
 
 # Acessando as variáveis
@@ -51,6 +69,7 @@ def iniciar_driver():
     driver = None
     if browser == "firefox":
         from selenium.webdriver.firefox.options import Options as FirefoxOptions
+        from selenium.webdriver.firefox.service import Service as FirefoxService
         options = FirefoxOptions()
         options.add_argument("--headless")
         profile = webdriver.FirefoxProfile()
@@ -59,9 +78,16 @@ def iniciar_driver():
         profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,application/vnd.ms-excel")
         profile.set_preference("pdfjs.disabled", True)
         options.profile = profile
-        driver = webdriver.Firefox(options=options)
+        try:
+            driver = webdriver.Firefox(options=options)
+        except Exception as e:
+            print("[Firefox] Selenium Manager falhou, tentando driver manual...", e)
+            driver_path = os.path.join(base_path, "geckodriver.exe")
+            service = FirefoxService(executable_path=driver_path)
+            driver = webdriver.Firefox(service=service, options=options)
     elif browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
+        from selenium.webdriver.chrome.service import Service as ChromeService
         options = ChromeOptions()
         options.add_argument("--headless=new")
         prefs = {
@@ -71,9 +97,16 @@ def iniciar_driver():
             "safebrowsing.enabled": True
         }
         options.add_experimental_option("prefs", prefs)
-        driver = webdriver.Chrome(options=options)
+        try:
+            driver = webdriver.Chrome(options=options)
+        except Exception as e:
+            print("[Chrome] Selenium Manager falhou, tentando driver manual...", e)
+            driver_path = os.path.join(base_path, "chromedriver.exe")
+            service = ChromeService(executable_path=driver_path)
+            driver = webdriver.Chrome(service=service, options=options)
     elif browser == "edge":
         from selenium.webdriver.edge.options import Options as EdgeOptions
+        from selenium.webdriver.edge.service import Service as EdgeService
         options = EdgeOptions()
         options.add_argument("--headless=new")
         prefs = {
@@ -83,7 +116,13 @@ def iniciar_driver():
             "safebrowsing.enabled": True
         }
         options.add_experimental_option("prefs", prefs)
-        driver = webdriver.Edge(options=options)
+        try:
+            driver = webdriver.Edge(options=options)
+        except Exception as e:
+            print("[Edge] Selenium Manager falhou, tentando driver manual...", e)
+            driver_path = os.path.join(base_path, "msedgedriver.exe")
+            service = EdgeService(executable_path=driver_path)
+            driver = webdriver.Edge(service=service, options=options)
     else:
         raise ValueError(f"Navegador não suportado: {browser}")
     return driver
@@ -107,8 +146,23 @@ def inserir_texto(driver, xpath, texto):
     elemento.send_keys(texto)
 
 def clicar_elemento(driver, xpath):
-    # print(f"Clicando no elemento...")
-    driver.find_element(By.XPATH, xpath).click()
+    try:
+        # Espera o elemento estar clicável
+        elemento = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        )
+        # Scroll até o elemento
+        driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+        try:
+            elemento.click()
+        except Exception as e:
+            print(f"[clicar_elemento] Clique normal falhou, tentando via JS... {e}")
+            driver.execute_script("arguments[0].click();", elemento)
+    except Exception as e:
+        print(f"[clicar_elemento] Erro ao clicar no elemento: {e}")
+        # Tira screenshot para debug
+        driver.save_screenshot("erro_clicar_elemento.png")
+        raise
 
 def clicar_elemento_real(driver, xpath):
     elemento = WebDriverWait(driver, 30).until(
@@ -130,12 +184,21 @@ def gerar_otp():
         exit(1)
 
 def selecionar_data(driver, xpath, data):
-    print("Computando datas...")
+    print(f"Computando datas... Valor calculado: {data}")
     elemento = esperar_elemento(driver, xpath)
-    elemento.clear()
     elemento.click()
+    from selenium.webdriver.common.keys import Keys as SeleniumKeys
+    # Pressiona ESC duas vezes para garantir que o datepicker feche
+    driver.find_element(By.TAG_NAME, 'body').send_keys(SeleniumKeys.ESCAPE)
+    time.sleep(0.1)
+    driver.find_element(By.TAG_NAME, 'body').send_keys(SeleniumKeys.ESCAPE)
+    time.sleep(0.1)
+    elemento = driver.find_element(By.XPATH, xpath)
+    elemento.click()
+    elemento.clear()
     elemento.send_keys(data)
-    driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
+    elemento.send_keys(Keys.ENTER)
+    time.sleep(0.2)
 
 def selecionar_texto(driver, xpath, text):
     # print("Selecionando textos...")
@@ -243,6 +306,9 @@ def exportAtividadesStatus(driver):
     data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
     selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
+    # Envia ESC para fechar overlays antes de clicar no botão de pesquisa
+    from selenium.webdriver.common.keys import Keys as SeleniumKeys
+    driver.find_element(By.TAG_NAME, 'body').send_keys(SeleniumKeys.ESCAPE)
     clicar_elemento(driver, XPATHS['atividades']['search_button'])
     realizar_download_atividades(driver, XPATHS['atividades']['export_status_button'])
 
@@ -343,10 +409,7 @@ def executar_rotina():
         logger.info(f"Iniciando execução em {data_atual}")
         print(f"Iniciando execução em {data_atual}")
 
-        # Limpar a pasta de downloads antes de iniciar os downloads
-        # (opcional: pode remover esta limpeza se não quiser apagar arquivos do usuário)
         user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        # Limpar arquivos antigos na pasta Downloads do usuário que contenham palavras-chave
         palavras_chave = ["atividades", "status", "produção"]
         for f in os.listdir(user_download_dir):
             if any(palavra in f.lower() for palavra in palavras_chave):
@@ -357,25 +420,18 @@ def executar_rotina():
 
         driver = iniciar_driver()
         login(driver)
+
+        # --- Datas calculadas ---
+        data_atual_dt = datetime.now()
+        data_atividades = (data_atual_dt - timedelta(days=90)).strftime("%d/%m/%Y")
+        data_producao = (data_atual_dt - timedelta(days=92)).replace(day=1).strftime("%d/%m/%Y")
+        # ------------------------
+
         exportAtividadesStatus(driver)
-        # logout(driver)
-        # time.sleep(5)
-        # driver.quit()
         time.sleep(10)
-
-        # driver = iniciar_driver()
-        # login(driver)
         exportAtividades(driver)
-        # logout(driver)
-        # time.sleep(5)
-        # driver.quit()
         time.sleep(10)
-
-        # driver = iniciar_driver()
-        # login(driver)
         exportProducao(driver)
-        # logout(driver)
-        # time.sleep(5)
         driver.quit()
         time.sleep(10)
 
@@ -384,13 +440,19 @@ def executar_rotina():
         os.makedirs(dirDestino, exist_ok=True)
         subDiretorio = "histórico"
 
-        # Listar arquivos encontrados na pasta de download
         print("Arquivos encontrados na pasta de download:", os.listdir(dirOrigem))
         logger.info(f"Arquivos encontrados na pasta de download: {os.listdir(dirOrigem)}")
 
-        # Mover todos arquivos .xlsx encontrados
         arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
         mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
+
+        # Exibir datas utilizadas nos relatórios junto ao relatório de movimentação
+        print("\nResumo dos períodos utilizados nos relatórios gerados:")
+        print("-----------------------------------------------")
+        print(f"  Atividades Status: {data_atividades}")
+        print(f"  Atividades:       {data_atividades}")
+        print(f"  Produção:         {data_producao}")
+        print("-----------------------------------------------\n")
 
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Finalizado em {data_atual}")
