@@ -2,6 +2,8 @@
 *.csv
 logs
 element_screenshots/
+*.zip
+*.rar
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
