@@ -61,6 +61,7 @@ secret_otp = os.getenv("SYS_SECRET_OTP")
 destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
 browser = os.getenv("BROWSER", "firefox").lower()
 
+headless_env = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes", "sim")
 
 def iniciar_driver():
     print(f"Iniciando driver do navegador... ({browser})")
@@ -71,7 +72,8 @@ def iniciar_driver():
         from selenium.webdriver.firefox.options import Options as FirefoxOptions
         from selenium.webdriver.firefox.service import Service as FirefoxService
         options = FirefoxOptions()
-        options.add_argument("--headless")
+        if headless_env:
+            options.add_argument("--headless")
         profile = webdriver.FirefoxProfile()
         profile.set_preference("browser.download.folderList", 2)
         profile.set_preference("browser.download.dir", user_download_dir)
@@ -89,7 +91,16 @@ def iniciar_driver():
         from selenium.webdriver.chrome.options import Options as ChromeOptions
         from selenium.webdriver.chrome.service import Service as ChromeService
         options = ChromeOptions()
-        options.add_argument("--headless=new")
+        if headless_env:
+            options.add_argument("--headless=new")
+        options.add_argument("--log-level=3")  # Suprimir logs
+        options.add_argument("--silent")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-logging")
+        options.add_argument("--disable-google-api")
         prefs = {
             "download.default_directory": user_download_dir,
             "download.prompt_for_download": False,
@@ -97,6 +108,7 @@ def iniciar_driver():
             "safebrowsing.enabled": True
         }
         options.add_experimental_option("prefs", prefs)
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])
         try:
             driver = webdriver.Chrome(options=options)
         except Exception as e:
@@ -108,7 +120,8 @@ def iniciar_driver():
         from selenium.webdriver.edge.options import Options as EdgeOptions
         from selenium.webdriver.edge.service import Service as EdgeService
         options = EdgeOptions()
-        options.add_argument("--headless=new")
+        if headless_env:
+            options.add_argument("--headless=new")
         prefs = {
             "download.default_directory": user_download_dir,
             "download.prompt_for_download": False,
@@ -131,27 +144,37 @@ def acessar_pagina(driver, url):
     driver.get(url)
     print(f"Acessando {url}")
 
-def esperar_elemento(driver, xpath, tempo=300):
-    # print("Elemento em espera...")
-    return WebDriverWait(driver, tempo).until(
-        EC.presence_of_element_located((By.XPATH, xpath))
-    )
-
-def inserir_texto(driver, xpath, texto):
-    # print("Inserindo texto...")
-    esperar_elemento(driver, xpath)
-    elemento = driver.find_element(By.XPATH, xpath)
-    elemento.click()
-    elemento.clear()
-    elemento.send_keys(texto)
-
-def clicar_elemento(driver, xpath):
+def esperar_elemento(driver, xpath, tempo=300, xpath_key=None):
     try:
-        # Espera o elemento estar clicável
+        return WebDriverWait(driver, tempo).until(
+            EC.presence_of_element_located((By.XPATH, xpath))
+        )
+    except Exception as e:
+        if xpath_key:
+            print(f"[ERRO] Não foi possível acessar o xpath da chave '{xpath_key}': {xpath}")
+        else:
+            print(f"[ERRO] Não foi possível acessar o xpath: {xpath}")
+        raise
+
+def inserir_texto(driver, xpath, texto, xpath_key=None):
+    try:
+        esperar_elemento(driver, xpath, xpath_key=xpath_key)
+        elemento = driver.find_element(By.XPATH, xpath)
+        elemento.click()
+        elemento.clear()
+        elemento.send_keys(texto)
+    except Exception as e:
+        if xpath_key:
+            print(f"[ERRO] Falha ao inserir texto no xpath da chave '{xpath_key}': {xpath}")
+        else:
+            print(f"[ERRO] Falha ao inserir texto no xpath: {xpath}")
+        raise
+
+def clicar_elemento(driver, xpath, xpath_key=None):
+    try:
         elemento = WebDriverWait(driver, 30).until(
             EC.element_to_be_clickable((By.XPATH, xpath))
         )
-        # Scroll até o elemento
         driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
         try:
             elemento.click()
@@ -159,8 +182,10 @@ def clicar_elemento(driver, xpath):
             print(f"[clicar_elemento] Clique normal falhou, tentando via JS... {e}")
             driver.execute_script("arguments[0].click();", elemento)
     except Exception as e:
-        print(f"[clicar_elemento] Erro ao clicar no elemento: {e}")
-        # Tira screenshot para debug
+        if xpath_key:
+            print(f"[ERRO] Não foi possível clicar no xpath da chave '{xpath_key}': {xpath}")
+        else:
+            print(f"[ERRO] Não foi possível clicar no xpath: {xpath}")
         driver.save_screenshot("erro_clicar_elemento.png")
         raise
 
@@ -173,8 +198,9 @@ def clicar_elemento_real(driver, xpath):
 
 def gerar_otp():
     print("Gerando OTP...")
+    otp_url = os.getenv("OTP_URL", "http://192.168.0.129:8001/generate_otp")
     response = requests.post(
-        'http://192.168.0.129:8001/generate_otp', 
+        otp_url, 
         json={"secret": secret_otp}
     )
     if response.status_code == 200:
@@ -249,10 +275,10 @@ def baixar_arquivo_com_cookies(driver, url, caminho_destino):
 
 def realizar_download_atividades(driver, button_xpath):
     print("Realizando download de atividades...")
-    clicar_elemento(driver, button_xpath)
-    esperar_elemento(driver, XPATHS['atividades']['input_code_field'])
+    clicar_elemento(driver, button_xpath, xpath_key="atividades.export_status_button")
+    esperar_elemento(driver, XPATHS['atividades']['input_code_field'], xpath_key="atividades.input_code_field")
 
-    codigo_elemento = esperar_elemento(driver, XPATHS['atividades']['code_field'])
+    codigo_elemento = esperar_elemento(driver, XPATHS['atividades']['code_field'], xpath_key="atividades.code_field")
     codigo_texto = codigo_elemento.text
     # Extrair o número do texto usando regex
     match = re.search(r"(\d+)", codigo_texto)
@@ -261,28 +287,28 @@ def realizar_download_atividades(driver, button_xpath):
     else:
         raise ValueError(f"Não foi possível extrair o número de atividades do texto: {codigo_texto}")
 
-    inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_atividades)
-    clicar_elemento(driver, XPATHS['atividades']['confirm_button'])
+    inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_atividades, xpath_key="atividades.input_code_field")
+    clicar_elemento(driver, XPATHS['atividades']['confirm_button'], xpath_key="atividades.confirm_button")
     elemento_download = esperar_download_pronto(driver, XPATHS['atividades']['download_link'])
     url_download = elemento_download.get_attribute('href')
     nome_arquivo = elemento_download.text.strip() or 'Exportacao Atividades.xlsx'
     user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     caminho_destino = os.path.join(user_download_dir, nome_arquivo)
     baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
-    clicar_elemento(driver, XPATHS['atividades']['close_button'])
+    clicar_elemento(driver, XPATHS['atividades']['close_button'], xpath_key="atividades.close_button")
     fechar_modal(driver)
     print("Atividades baixadas com sucesso.")
 
 def realizar_download_producao(driver):
     print("Realizando download de produção...")
-    esperar_elemento(driver, XPATHS['producao']['download_link'], 300)
+    esperar_elemento(driver, XPATHS['producao']['download_link'], 300, xpath_key="producao.download_link")
     elemento_download = esperar_download_pronto(driver, XPATHS['producao']['download_link'])
     url_download = elemento_download.get_attribute('href')
     nome_arquivo = elemento_download.text.strip() or 'ExportacaoProducao.xlsx'
     user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     caminho_destino = os.path.join(user_download_dir, nome_arquivo)
     baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
-    clicar_elemento(driver, XPATHS['producao']['close_button'])
+    clicar_elemento(driver, XPATHS['producao']['close_button'], xpath_key="producao.close_button")
     print("Produção baixado com sucesso.")
 
 def fechar_modal(driver):
@@ -298,8 +324,8 @@ def fechar_modal(driver):
 
 def exportAtividadesStatus(driver):
     print("Exportando atividades<>status...")
-    esperar_elemento(driver, XPATHS['atividades']['panel'])
-    clicar_elemento(driver, XPATHS['atividades']['panel'])
+    esperar_elemento(driver, XPATHS['atividades']['panel'], xpath_key="atividades.panel")
+    clicar_elemento(driver, XPATHS['atividades']['panel'], xpath_key="atividades.panel")
     
     data_atual = datetime.now() # Obtém a data atual
     data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
@@ -309,26 +335,26 @@ def exportAtividadesStatus(driver):
     # Envia ESC para fechar overlays antes de clicar no botão de pesquisa
     from selenium.webdriver.common.keys import Keys as SeleniumKeys
     driver.find_element(By.TAG_NAME, 'body').send_keys(SeleniumKeys.ESCAPE)
-    clicar_elemento(driver, XPATHS['atividades']['search_button'])
+    clicar_elemento(driver, XPATHS['atividades']['search_button'], xpath_key="atividades.search_button")
     realizar_download_atividades(driver, XPATHS['atividades']['export_status_button'])
 
 def exportAtividades(driver):
     print("Exportando atividades...")
-    esperar_elemento(driver, XPATHS['atividades']['panel'])
-    clicar_elemento(driver, XPATHS['atividades']['panel'])
+    esperar_elemento(driver, XPATHS['atividades']['panel'], xpath_key="atividades.panel")
+    clicar_elemento(driver, XPATHS['atividades']['panel'], xpath_key="atividades.panel")
     
     data_atual = datetime.now() # Obtém a data atual
     data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
     data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     
     selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial)
-    clicar_elemento(driver, XPATHS['atividades']['search_button'])
+    clicar_elemento(driver, XPATHS['atividades']['search_button'], xpath_key="atividades.search_button")
     realizar_download_atividades(driver, XPATHS['atividades']['export_atividades_button'])
 
 def exportProducao(driver):
     print("Exportando produção...")
-    esperar_elemento(driver, XPATHS['producao']['panel'])
-    clicar_elemento(driver, XPATHS['producao']['panel'])
+    esperar_elemento(driver, XPATHS['producao']['panel'], xpath_key="producao.panel")
+    clicar_elemento(driver, XPATHS['producao']['panel'], xpath_key="producao.panel")
 
     data_atual = datetime.now() # Obtém a data atual
     data_90_dias_atras = data_atual - timedelta(days=92) # Subtrai 90 dias da data atual
@@ -338,27 +364,35 @@ def exportProducao(driver):
 
     selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial)
     selecionar_texto(driver, XPATHS['producao']['combo_box'], texto)
-    clicar_elemento(driver, XPATHS['producao']['radio_button'])
-    clicar_elemento(driver, XPATHS['producao']['search_button'])
+    clicar_elemento(driver, XPATHS['producao']['radio_button'], xpath_key="producao.radio_button")
+    clicar_elemento(driver, XPATHS['producao']['search_button'], xpath_key="producao.search_button")
     realizar_download_producao(driver)
     fechar_modal(driver)
 
 def login(driver):
     acessar_pagina(driver, url)
     print("Realizando login...")
-    esperar_elemento(driver, XPATHS['login']['username_field'])
+    esperar_elemento(driver, XPATHS['login']['username_field'], xpath_key="login.username_field")
     
-    inserir_texto(driver, XPATHS['login']['username_field'], username)
-    inserir_texto(driver, XPATHS['login']['password_field'], password)
+    inserir_texto(driver, XPATHS['login']['username_field'], username, xpath_key="login.username_field")
+    inserir_texto(driver, XPATHS['login']['password_field'], password, xpath_key="login.password_field")
     
     while True:
         otp = gerar_otp()
-        clicar_elemento(driver, XPATHS['login']['otp_radio'])
-        clicar_elemento(driver, XPATHS['login']['otp_field'])
-        inserir_texto(driver, XPATHS['login']['otp_field'], otp)
-        clicar_elemento(driver, XPATHS['login']['login_button'])
+        try:
+            clicar_elemento(driver, XPATHS['login']['otp_radio'], xpath_key="login.otp_radio")
+        except Exception:
+            print("[INFO] Ignorando etapa de clicar no otp_radio.")
         
-        time.sleep(2) 
+        # Otimizar inserção do OTP
+        otp_field = esperar_elemento(driver, XPATHS['login']['otp_field'], xpath_key="login.otp_field")
+        otp_field.click()
+        otp_field.clear()
+        otp_field.send_keys(otp)
+        
+        clicar_elemento(driver, XPATHS['login']['login_button'], xpath_key="login.login_button")
+        
+        time.sleep(1)  # Reduzir tempo de espera
         
         try:
             mensagem = driver.find_element(By.XPATH, XPATHS['login']['error_message']).text
@@ -373,10 +407,10 @@ def login(driver):
 
 def logout(driver):
     print("Realizando logout...")
-    esperar_elemento(driver, XPATHS['logout']['logout_button'])
-    clicar_elemento(driver, XPATHS['logout']['logout_button'])
-    esperar_elemento(driver, XPATHS['logout']['logout_option'])
-    clicar_elemento(driver, XPATHS['logout']['logout_option'])
+    esperar_elemento(driver, XPATHS['logout']['logout_button'], xpath_key="logout.logout_button")
+    clicar_elemento(driver, XPATHS['logout']['logout_button'], xpath_key="logout.logout_button")
+    esperar_elemento(driver, XPATHS['logout']['logout_option'], xpath_key="logout.logout_option")
+    clicar_elemento(driver, XPATHS['logout']['logout_option'], xpath_key="logout.logout_option")
 
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     print("Iniciando movimentação segura de arquivos...")    
@@ -444,7 +478,7 @@ def executar_rotina():
         logger.info(f"Arquivos encontrados na pasta de download: {os.listdir(dirOrigem)}")
 
         arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
-        mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
+        # mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
 
         # Exibir datas utilizadas nos relatórios junto ao relatório de movimentação
         print("\nResumo dos períodos utilizados nos relatórios gerados:")
