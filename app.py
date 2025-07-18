@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from selenium.webdriver.common.action_chains import ActionChains
 import logging
+import sys
+from pathlib import Path
 
 # Configuração de logging
 logging.basicConfig(
@@ -25,7 +27,22 @@ def send_notification(msg):
     logger.warning(f'NOTIFICAÇÃO: {msg}')
 
 # Carrega as variáveis do arquivo .env
-load_dotenv()
+if not Path('.env').exists():
+    print('Arquivo .env não encontrado!')
+    sys.exit(1)
+load_dotenv('.env', override=True)
+
+# Função para checar variáveis obrigatórias
+def checar_variaveis_obrigatorias(vars_list):
+    faltando = [v for v in vars_list if not os.getenv(v)]
+    if faltando:
+        print(f"Variáveis obrigatórias faltando no .env: {', '.join(faltando)}")
+        sys.exit(1)
+
+checar_variaveis_obrigatorias([
+    'SYS_URL', 'SYS_USERNAME', 'SYS_PASSWORD', 'SYS_SECRET_OTP', 'DESTINO_FINAL_DIR',
+    'BROWSER', 'RETRIES_DOWNLOAD', 'TIMEOUT_DOWNLOAD', 'HEADLESS', 'OTP_URL'
+])
 
 # Timeouts configuráveis
 TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
@@ -41,7 +58,11 @@ username = os.getenv("SYS_USERNAME")
 password = os.getenv("SYS_PASSWORD")
 secret_otp = os.getenv("SYS_SECRET_OTP")
 destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
-browser = os.getenv("BROWSER", "firefox").lower()
+browser = os.getenv("BROWSER")
+print(f"Valor lido de BROWSER no .env: {browser!r}")
+browser = browser.strip().replace('"','').replace("'","").lower()
+headless = os.getenv("HEADLESS", "false").lower() == "true"
+otp_url = os.getenv("OTP_URL", "http://localhost:8000/generate_otp")
 
 
 def iniciar_driver():
@@ -52,7 +73,8 @@ def iniciar_driver():
     if browser == "firefox":
         from selenium.webdriver.firefox.options import Options as FirefoxOptions
         options = FirefoxOptions()
-        options.add_argument("--headless")
+        if headless:
+            options.add_argument("--headless")
         profile = webdriver.FirefoxProfile()
         profile.set_preference("browser.download.folderList", 2)
         profile.set_preference("browser.download.dir", user_download_dir)
@@ -63,7 +85,8 @@ def iniciar_driver():
     elif browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
         options = ChromeOptions()
-        options.add_argument("--headless=new")
+        if headless:
+            options.add_argument("--headless=new")
         prefs = {
             "download.default_directory": user_download_dir,
             "download.prompt_for_download": False,
@@ -75,7 +98,8 @@ def iniciar_driver():
     elif browser == "edge":
         from selenium.webdriver.edge.options import Options as EdgeOptions
         options = EdgeOptions()
-        options.add_argument("--headless=new")
+        if headless:
+            options.add_argument("--headless=new")
         prefs = {
             "download.default_directory": user_download_dir,
             "download.prompt_for_download": False,
@@ -120,7 +144,7 @@ def clicar_elemento_real(driver, xpath):
 def gerar_otp():
     print("Gerando OTP...")
     response = requests.post(
-        'http://192.168.0.129:8001/generate_otp', 
+        otp_url, 
         json={"secret": secret_otp}
     )
     if response.status_code == 200:
