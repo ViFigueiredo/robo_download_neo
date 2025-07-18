@@ -71,6 +71,7 @@ browser = browser.strip().replace('"','').replace("'","").lower()
 headless = os.getenv("HEADLESS", "false").lower() == "true"
 otp_url = os.getenv("OTP_URL", "http://localhost:8000/generate_otp")
 
+logger.info(f"Valor de url: {url!r}")
 
 def iniciar_driver():
     logger.info(f"Iniciando driver do navegador... ({browser})")
@@ -110,8 +111,9 @@ def iniciar_driver():
     return driver
 
 def acessar_pagina(driver, url):
+    logger.info(f"Tentando acessar: {url!r}")
     driver.get(url)
-    logger.info(f"Acessando {url}")
+    logger.info(f"Acessou: {url!r}")
 
 def encontrar_elemento(driver, xpath, referencia_map=None, tempo=10):
     try:
@@ -133,18 +135,27 @@ def esperar_elemento(driver, xpath, referencia_map=None, tempo=300):
         raise Exception(f"Elemento não encontrado: {xpath} (referência map.json: {referencia_map})")
     return elemento
 
-def inserir_texto(driver, xpath, texto, referencia_map=None):
-    elemento = esperar_elemento(driver, xpath, referencia_map)
-    if elemento:
-        elemento.click()
-        elemento.clear()
-        elemento.send_keys(texto)
-
+def salvar_screenshot_elemento(driver, elemento, referencia_map=None):
+    from pathlib import Path
+    import datetime
+    screenshots_dir = Path('element_screenshots')
+    screenshots_dir.mkdir(exist_ok=True)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    ref = referencia_map.replace('.', '_') if referencia_map else 'elemento'
+    filename = f'{ref}_{timestamp}.png'
+    filepath = screenshots_dir / filename
+    try:
+        driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+        elemento.screenshot(str(filepath))
+        logger.info(f"Screenshot do elemento salvo em: {filepath}")
+    except Exception as e:
+        logger.warning(f"Falha ao salvar screenshot do elemento: {e}")
 
 def clicar_elemento(driver, xpath, referencia_map=None):
     try:
         elemento = encontrar_elemento(driver, xpath, referencia_map)
         if elemento:
+            salvar_screenshot_elemento(driver, elemento, referencia_map)
             elemento.click()
     except ElementClickInterceptedException as e:
         logger.warning(f"Click interceptado em {xpath} (referência map.json: {referencia_map}). Tentando pressionar ESC para fechar overlay.")
@@ -153,6 +164,7 @@ def clicar_elemento(driver, xpath, referencia_map=None):
         try:
             elemento = encontrar_elemento(driver, xpath, referencia_map)
             if elemento:
+                salvar_screenshot_elemento(driver, elemento, referencia_map)
                 elemento.click()
         except Exception as e2:
             logger.error(f"Falha ao clicar após ESC: {e2}")
@@ -163,6 +175,7 @@ def clicar_elemento_real(driver, xpath, referencia_map=None):
     try:
         elemento = encontrar_elemento(driver, xpath, referencia_map, tempo=30)
         if elemento:
+            salvar_screenshot_elemento(driver, elemento, referencia_map)
             driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
             ActionChains(driver).move_to_element(elemento).click().perform()
     except ElementClickInterceptedException as e:
@@ -172,6 +185,7 @@ def clicar_elemento_real(driver, xpath, referencia_map=None):
         try:
             elemento = encontrar_elemento(driver, xpath, referencia_map, tempo=30)
             if elemento:
+                salvar_screenshot_elemento(driver, elemento, referencia_map)
                 driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
                 ActionChains(driver).move_to_element(elemento).click().perform()
         except Exception as e2:
@@ -267,6 +281,14 @@ def baixar_arquivo_com_cookies(driver, url, caminho_destino):
         time.sleep(2)
     send_notification(f'Falha ao baixar arquivo após {RETRIES_DOWNLOAD} tentativas: {url}')
     return False
+
+def inserir_texto(driver, xpath, texto, referencia_map=None):
+    elemento = esperar_elemento(driver, xpath, referencia_map)
+    if elemento:
+        salvar_screenshot_elemento(driver, elemento, referencia_map)
+        elemento.click()
+        elemento.clear()
+        elemento.send_keys(texto)
 
 def realizar_download_atividades(driver, button_xpath):
     logger.info("Realizando download de atividades...")
@@ -429,6 +451,7 @@ def executar_rotina():
         etapas.append("Driver iniciado")
         driver = iniciar_driver()
         etapas.append("Login realizado")
+        login(driver)
         # Exportação Atividades Status
         data_atual_dt = datetime.now()
         data_90_dias_atras = data_atual_dt - timedelta(days=90)
