@@ -430,24 +430,50 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     historico_path = os.path.join(diretorio_destino, subdiretorio)
     os.makedirs(historico_path, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    arquivos_movidos = 0
+    arquivos_ignorados = 0
 
     for arquivo in arquivos:
         dest_file = os.path.join(diretorio_destino, arquivo)
         orig_file = os.path.join(diretorio_origem, arquivo)        
 
         if os.path.exists(orig_file): # Verifica se o arquivo de origem existe
-            if os.path.exists(dest_file): # Gerenciar conflitos no destino
-                logger.warning(f"💥 Conflito detectado: {arquivo}")
-                nome, ext = os.path.splitext(arquivo) # Gerar novo nome único
-                nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
-                shutil.move(dest_file, os.path.join(historico_path, nome_salvo)) # Mover arquivo conflitante para histórico
-                logger.info(f"✅ Backup criado: {nome_salvo}")            
+            try:
+                if os.path.exists(dest_file): # Gerenciar conflitos no destino
+                    logger.warning(f"💥 Conflito detectado: {arquivo}")
+                    try:
+                        nome, ext = os.path.splitext(arquivo) # Gerar novo nome único
+                        nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
+                        shutil.move(dest_file, os.path.join(historico_path, nome_salvo)) # Mover arquivo conflitante para histórico
+                        logger.info(f"✅ Backup criado: {nome_salvo}")
+                    except PermissionError as e:
+                        logger.warning(f"⚠️ Não foi possível criar backup de {arquivo}: {e}")
+                        logger.warning(f"⚠️ Ignorando movimentação do arquivo: {arquivo}")
+                        arquivos_ignorados += 1
+                        continue
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erro ao criar backup de {arquivo}: {e}")
+                        logger.warning(f"⚠️ Ignorando movimentação do arquivo: {arquivo}")
+                        arquivos_ignorados += 1
+                        continue
 
-            shutil.move(orig_file, dest_file) # Mover arquivo original para o destino
-            logger.info(f"➡️ {arquivo} movido para destino")
+                shutil.move(orig_file, dest_file) # Mover arquivo original para o destino
+                logger.info(f"➡️ {arquivo} movido para destino")
+                arquivos_movidos += 1
+            except PermissionError as e:
+                logger.warning(f"⚠️ Arquivo em uso por outro processo: {arquivo}")
+                logger.warning(f"⚠️ Detalhes do erro: {e}")
+                logger.warning(f"⚠️ Ignorando movimentação do arquivo e continuando o fluxo...")
+                arquivos_ignorados += 1
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao mover arquivo {arquivo}: {e}")
+                logger.warning(f"⚠️ Ignorando movimentação do arquivo e continuando o fluxo...")
+                arquivos_ignorados += 1
         else:
             logger.warning(f"⚠️ Arquivo ausente: {orig_file}")
-    logger.info("Operação concluída com segurança!\n")
+            arquivos_ignorados += 1
+    
+    logger.info(f"Operação concluída: {arquivos_movidos} arquivo(s) movido(s), {arquivos_ignorados} arquivo(s) ignorado(s)\n")
 
 def executar_rotina():
     etapas = []
@@ -461,8 +487,14 @@ def executar_rotina():
             if any(palavra in f.lower() for palavra in palavras_chave):
                 file_path = os.path.join(user_download_dir, f)
                 if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    logger.info(f"Arquivo antigo removido: {f}")
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"Arquivo antigo removido: {f}")
+                    except PermissionError as e:
+                        logger.warning(f"⚠️ Não foi possível remover arquivo antigo (em uso): {f}")
+                        logger.warning(f"⚠️ Detalhes: {e}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erro ao remover arquivo antigo: {f} - {e}")
         etapas.append("Driver iniciado")
         driver = iniciar_driver()
         etapas.append("Login realizado")
@@ -501,7 +533,7 @@ def executar_rotina():
         logger.info(f"Arquivos encontrados na pasta de download: {os.listdir(dirOrigem)}")
         arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
         mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
-        etapas.append("Arquivos movidos para destino final")
+        etapas.append("Arquivos processados")
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Finalizado em {data_atual}")
         etapas.append(f"Finalizado em {data_atual}")
@@ -509,7 +541,12 @@ def executar_rotina():
     except Exception as e:
         etapas.append(f"Erro: {e}")
         logger.error(f"Erro: {e}")
-        send_notification(f"Erro crítico na execução: {e}")
+        # Não tratar erros de arquivo em uso como críticos
+        if "WinError 32" in str(e) and "já está sendo usado por outro processo" in str(e):
+            logger.warning(f"Arquivo em uso detectado: {e}")
+            logger.warning("Este erro não é crítico e o fluxo continuará normalmente.")
+        else:
+            send_notification(f"Erro crítico na execução: {e}")
     finally:
         print("\nResumo das etapas executadas:")
         for etapa in etapas:
