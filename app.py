@@ -81,6 +81,7 @@ def iniciar_driver():
     if browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
         options = ChromeOptions()
+        options.add_argument("--start-maximized")
         if headless:
             options.add_argument("--headless=new")
         options.add_argument("--log-level=3")
@@ -96,6 +97,7 @@ def iniciar_driver():
     elif browser == "edge":
         from selenium.webdriver.edge.options import Options as EdgeOptions
         options = EdgeOptions()
+        options.add_argument("--start-maximized")
         if headless:
             options.add_argument("--headless=new")
         prefs = {
