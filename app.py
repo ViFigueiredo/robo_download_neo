@@ -477,10 +477,14 @@ def executar_rotina():
         etapas.append(f"Exportação Atividades Status (data inicial: {data_inicial_atividades})")
         exportAtividadesStatus(driver)
         time.sleep(10)
+        # Abrir sidebar
+        abrir_sidebar(driver)
         # Exportação Atividades
         etapas.append(f"Exportação Atividades (data inicial: {data_inicial_atividades})")
         exportAtividades(driver)
         time.sleep(10)
+        # Abrir sidebar
+        abrir_sidebar(driver)
         # Exportação Produção
         data_90_dias_atras_producao = data_atual_dt - timedelta(days=92)
         data_inicial_ajustada = data_90_dias_atras_producao.replace(day=1)
