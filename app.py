@@ -81,7 +81,7 @@ def iniciar_driver():
     if browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
         options = ChromeOptions()
-        options.add_argument("--start-maximized")
+        # options.add_argument("--start-maximized")
         if headless:
             options.add_argument("--headless=new")
         options.add_argument("--log-level=3")
@@ -404,6 +404,19 @@ def login(driver):
             break
     logger.info("Login realizado com sucesso!")
 
+def abrir_sidebar(driver):
+    logger.info("Abrindo sidebar...")
+    try:
+        sidebar = esperar_elemento(driver, XPATHS['atividades']['sidebar'], 'atividades.sidebar')
+        if sidebar:
+            # Adiciona o atributo drawer-opened ao elemento sidebar
+            driver.execute_script("arguments[0].setAttribute('drawer-opened', '');", sidebar)
+            logger.info("Atributo drawer-opened adicionado ao sidebar com sucesso!")
+            time.sleep(1)  # Pequena pausa para garantir que a UI responda
+    except Exception as e:
+        logger.warning(f"Erro ao abrir sidebar: {e}")
+        # Continua mesmo se houver erro, pois isso não deve interromper o fluxo principal
+
 def logout(driver):
     logger.info("Realizando logout...")
     esperar_elemento(driver, XPATHS['logout']['logout_button'], 'logout.logout_button')
@@ -454,6 +467,9 @@ def executar_rotina():
         driver = iniciar_driver()
         etapas.append("Login realizado")
         login(driver)
+        # Abrir sidebar
+        abrir_sidebar(driver)
+        etapas.append("Sidebar aberto")
         # Exportação Atividades Status
         data_atual_dt = datetime.now()
         data_90_dias_atras = data_atual_dt - timedelta(days=90)

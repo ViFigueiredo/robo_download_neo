@@ -12,6 +12,7 @@
         "logout_option": "/html/body/vaadin-menu-bar-overlay/vaadin-menu-bar-list-box/vaadin-menu-bar-item[4]"
     },
     "atividades": {
+        "sidebar": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout",
         "panel": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-scroller/vcf-nav/vcf-nav-item[12]/vcf-nav-item[3]",
         "date_picker": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[1]/vaadin-horizontal-layout/vaadin-date-picker[3]/input",
         "search_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[1]/vaadin-horizontal-layout/vaadin-button[1]",
