@@ -45,7 +45,7 @@ def process_map_json_with_selenium(map_json, driver):
     return new_map
 
 # --- CONFIGURAÇÃO ---
-URL = "https://app.neocrm.com.br/home"  # Exemplo: "http://localhost:8080"
+URL = "https://neo.solucoes.plus/home"  # Exemplo: "http://localhost:8080"
 # --------------------
 
 # Carrega o map.json

@@ -1,0 +1,41 @@
+{
+    "login": {
+        "username_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-text-field[1]/input",
+        "password_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-password-field/input",
+        "otp_radio": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-radio-group/vaadin-radio-button[1]/input",
+        "otp_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-text-field[2]/input",
+        "login_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-button",
+        "error_message": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/div"
+    },
+    "logout": {
+        "logout_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]/vaadin-menu-bar-item/div",
+        "logout_option": "/html/body/vaadin-menu-bar-overlay/vaadin-menu-bar-list-box/vaadin-menu-bar-item[4]"
+    },
+    "atividades": {
+        "sidebar": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout",
+        "panel": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-scroller/vcf-nav/vcf-nav-item[12]/vcf-nav-item[3]",
+        "date_picker": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[1]/vaadin-horizontal-layout/vaadin-date-picker[3]/input",
+        "search_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[1]/vaadin-horizontal-layout/vaadin-button[1]",
+        "export_status_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[2]/vaadin-grid/vaadin-grid-cell-content[2]/vaadin-horizontal-layout/vaadin-button[7]",
+        "export_atividades_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/vaadin-vertical-layout/vaadin-vertical-layout[2]/vaadin-grid/vaadin-grid-cell-content[2]/vaadin-horizontal-layout/vaadin-button[5]",
+        "code_field": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/div",
+        "input_code_field": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-number-field/input",
+        "confirm_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-horizontal-layout/vaadin-button[2]",
+        "download_link": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/a",
+        "download_button": "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]",
+        "close_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button"
+    },
+    "producao": {
+        "panel": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-scroller/vcf-nav/vcf-nav-item[14]/vcf-nav-item[1]",
+        "date_picker": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-date-picker[1]/input",
+        "combo_box": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-combo-box[1]/input",
+        "radio_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-radio-group/vaadin-radio-button[8]/input",
+        "search_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-button",
+        "download_link": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/a",
+        "download_button": "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]",
+        "close_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button"
+    },
+    "common": {
+        "modal_overlay": "//vaadin-dialog-overlay[contains(@id, 'overlay')]"
+    }
+}
