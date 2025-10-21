@@ -55,8 +55,8 @@ checar_variaveis_obrigatorias([
 TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
 RETRIES_DOWNLOAD = int(os.getenv('RETRIES_DOWNLOAD', '3'))
 
-# Carrega os XPaths do arquivo map.json
-with open('map.json', 'r') as f:
+# Carrega os XPaths do arquivo map_relative.json (XPaths relativos mais robustos)
+with open('map_relative.json', 'r') as f:
     XPATHS = json.load(f)
 
 # Acessando as variáveis
@@ -147,7 +147,21 @@ def salvar_screenshot_elemento(driver, elemento, referencia_map=None):
     filename = f'{ref}_{timestamp}.png'
     filepath = screenshots_dir / filename
     try:
+        # Tentar atualizar a referência do elemento se ele estiver stale
+        if referencia_map and hasattr(elemento, 'find_element'):
+            try:
+                elemento.is_displayed()  # Testa se o elemento está stale
+            except:
+                # Se estiver stale, tenta encontrar o elemento novamente usando o xpath original
+                xpath = XPATHS
+                for key in referencia_map.split('.'):
+                    xpath = xpath[key]
+                elemento = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, xpath))
+                )
+        
         driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+        time.sleep(0.5)  # Pequena pausa para garantir que o elemento está visível
         elemento.screenshot(str(filepath))
         logger.info(f"Screenshot do elemento salvo em: {filepath}")
     except Exception as e:
@@ -481,6 +495,17 @@ def executar_rotina():
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Iniciando execução em {data_atual}")
         etapas.append(f"Execução iniciada em {data_atual}")
+        
+        # Limpa a pasta de screenshots
+        screenshots_dir = Path('element_screenshots')
+        if screenshots_dir.exists():
+            for arquivo in screenshots_dir.glob('*'):
+                try:
+                    arquivo.unlink()
+                    logger.info(f"Screenshot removido: {arquivo.name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Não foi possível remover screenshot: {arquivo.name} - {e}")
+        
         user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         palavras_chave = ["atividades", "status", "produção"]
         for f in os.listdir(user_download_dir):

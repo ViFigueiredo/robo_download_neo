@@ -1,11 +1,11 @@
 {
     "login": {
-        "username_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-text-field[1]/input",
-        "password_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-password-field/input",
-        "otp_radio": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-radio-group/vaadin-radio-button[1]/input",
-        "otp_field": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-text-field[2]/input",
-        "login_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-button",
-        "error_message": "/html/body/div[1]/flow-container-root-2521314/vaadin-vertical-layout/vaadin-vertical-layout/vaadin-vertical-layout/div"
+        "username_field": "//vaadin-vertical-layout//vaadin-text-field[1]/input",
+        "password_field": "//vaadin-vertical-layout//vaadin-password-field/input",
+        "otp_radio": "//vaadin-radio-group/vaadin-radio-button[1]/input",
+        "otp_field": "//vaadin-vertical-layout//vaadin-text-field[2]/input",
+        "login_button": "//vaadin-vertical-layout//vaadin-button",
+        "error_message": "//vaadin-vertical-layout//div[contains(@class, 'error')]"
     },
     "logout": {
         "logout_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-horizontal-layout/footer/vaadin-menu-bar/vaadin-menu-bar-button[1]/vaadin-menu-bar-item/div",
