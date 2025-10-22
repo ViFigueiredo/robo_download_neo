@@ -71,6 +71,14 @@ browser = browser.strip().replace('"','').replace("'","").lower()
 headless = os.getenv("HEADLESS", "false").lower() == "true"
 otp_url = os.getenv("OTP_URL", "http://localhost:8000/generate_otp")
 
+# Novas configurações para envio
+DRY_RUN = os.getenv('DRY_RUN', 'false').lower() == 'true'
+BATCH_SIZE = int(os.getenv('BATCH_SIZE', '25'))
+POST_RETRIES = int(os.getenv('POST_RETRIES', '3'))
+BACKOFF_BASE = float(os.getenv('BACKOFF_BASE', '1.5'))
+
+logger.info(f"DRY_RUN={DRY_RUN} BATCH_SIZE={BATCH_SIZE} POST_RETRIES={POST_RETRIES} BACKOFF_BASE={BACKOFF_BASE}")
+
 logger.info(f"Valor de url: {url!r}")
 
 def iniciar_driver():
@@ -341,6 +349,14 @@ def realizar_download_producao(driver):
     clicar_elemento(driver, XPATHS['producao']['close_button'], 'producao.close_button')
     logger.info("Produção baixado com sucesso.")
 
+    # Após baixar, processar o arquivo e enviar para a API NocoDB
+    try:
+        records = parse_export_producao(caminho_destino)
+        if records:
+            post_records_to_nocodb(records)
+    except Exception as e:
+        logger.error(f"Erro ao processar/enviar ExportacaoProducao.xlsx: {e}")
+
 def fechar_modal(driver):
     # print("Fechando modal...")
     try:
@@ -351,6 +367,177 @@ def fechar_modal(driver):
             # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
+
+
+# --- Início: funções para processamento do ExportacaoProducao.xlsx e envio ---
+def parse_export_producao(file_path):
+    """Parse usando pandas: mapeia colunas e concatena colunas sem header em TAGS."""
+    import pandas as pd
+
+    nocodb_map_file = 'nocodb_map.json'
+    if not os.path.exists(nocodb_map_file):
+        raise FileNotFoundError(f"Arquivo de mapeamento não encontrado: {nocodb_map_file}")
+
+    with open(nocodb_map_file, 'r', encoding='utf-8') as f:
+        mapping = json.load(f)
+
+    expected_headers = mapping.get(os.path.basename(file_path), [])
+    if not expected_headers:
+        logger.warning(f"Nenhum mapeamento encontrado em {nocodb_map_file} para {os.path.basename(file_path)}")
+
+    # Ler a planilha com pandas
+    try:
+        df = pd.read_excel(file_path, engine='openpyxl')
+    except Exception as e:
+        logger.error(f"Erro ao ler Excel {file_path}: {e}")
+        return []
+
+    # Normalizar cabeçalhos (string e strip)
+    df.columns = [str(c).strip() if pd.notna(c) else '' for c in df.columns]
+
+    records = []
+    for _, row in df.iterrows():
+        rec = {}
+        tags_extra = []
+        row_dict = row.to_dict()
+        for col, val in row_dict.items():
+            if col and col in expected_headers:
+                # Converter todos os valores para string adequadamente
+                if pd.isna(val):
+                    rec[col] = ""  # String vazia para valores nulos
+                elif isinstance(val, datetime):
+                    rec[col] = val.strftime("%Y-%m-%d %H:%M:%S")  # Formato consistente para datas
+                elif isinstance(val, (int, float)):
+                    rec[col] = str(val).replace(".0", "")  # Remove .0 de números inteiros
+                else:
+                    rec[col] = str(val).strip()  # Remove espaços e converte para string
+            else:
+                if not pd.isna(val):
+                    tags_extra.append(str(val).strip())
+
+        # Garantir todas as chaves esperadas existam com string vazia
+        for h in expected_headers:
+            if h not in rec or rec[h] is None:
+                rec[h] = ""
+
+        # Concatena tags
+        if 'TAGS' in rec:
+            existing = rec.get('TAGS', "")
+            parts = []
+            if existing:
+                parts.append(existing)
+            parts.extend(tags_extra)
+            rec['TAGS'] = ' | '.join(parts) if parts else ""
+        else:
+            rec['TAGS'] = ' | '.join(tags_extra) if tags_extra else ""
+
+        records.append(rec)
+
+    logger.info(f"Parsed {len(records)} registros de {file_path} (pandas)")
+    return records
+
+
+def post_records_to_nocodb(records):
+    """Envia registros para a API do NocoDB um por vez.
+
+    Respeita DRY_RUN (se true apenas loga payloads).
+    """
+    url = os.getenv('URL_TABELA_PRODUCAO')
+    token = os.getenv('BEARER_TOKEN')
+    if not url or not token:
+        raise ValueError('URL_TABELA_PRODUCAO e/ou BEARER_TOKEN não configurados no .env')
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+
+    os.makedirs('logs', exist_ok=True)
+    out_file = os.path.join('logs', 'sent_records.jsonl')
+
+    success = 0
+    failed = 0
+    total = len(records)
+
+    logger.info(f"Iniciando envio de {total} registros para {url}")
+
+    for record in records:
+        # Garantir que todos os campos sejam strings válidas
+        processed_record = {}
+        for key, value in record.items():
+            if value is None or str(value).lower() in ('none', 'nan', ''):
+                processed_record[key] = ""
+            elif isinstance(value, datetime):
+                processed_record[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(value, (int, float)):
+                processed_record[key] = str(value).replace(".0", "")
+            else:
+                processed_record[key] = str(value).strip()
+        
+        logger.info(f"Processando registro: {json.dumps(processed_record, ensure_ascii=False)}")
+
+        if DRY_RUN:
+            logger.info(f"DRY_RUN ativo. Payload: {json.dumps(processed_record, ensure_ascii=False)}")
+            with open(out_file, 'a', encoding='utf-8') as fo:
+                fo.write(json.dumps({'status': 'DRY_RUN', 'payload': processed_record}, default=str, ensure_ascii=False) + '\n')
+            success += 1
+            continue
+
+        # Tentar enviar o registro
+        attempt = 0
+        while attempt < POST_RETRIES:
+            try:
+                logger.info(f"Tentativa {attempt + 1} de envio para {url}")
+                resp = requests.post(url, headers=headers, json=processed_record, timeout=60)
+                
+                if resp.status_code in (200, 201):
+                    success += 1
+                    try:
+                        resjson = resp.json()
+                    except Exception:
+                        resjson = {'raw_text': resp.text}
+                    with open(out_file, 'a', encoding='utf-8') as fo:
+                        fo.write(json.dumps({
+                            'status': 'sent',
+                            'record': processed_record,
+                            'response': resjson
+                        }, default=str, ensure_ascii=False) + '\n')
+                    break
+                else:
+                    attempt += 1
+                    logger.warning(
+                        f"Falha no envio. Status={resp.status_code} "
+                        f"Response={resp.text} Tentativa={attempt}/{POST_RETRIES}"
+                    )
+                    if attempt >= POST_RETRIES:
+                        failed += 1
+                        with open(out_file, 'a', encoding='utf-8') as fo:
+                            fo.write(json.dumps({
+                                'status': 'failed',
+                                'record': processed_record,
+                                'response_status': resp.status_code,
+                                'response_text': resp.text
+                            }, default=str, ensure_ascii=False) + '\n')
+                    else:
+                        time.sleep(BACKOFF_BASE ** attempt)
+            except Exception as e:
+                attempt += 1
+                logger.error(f"Erro ao enviar: {e} tentativa={attempt}/{POST_RETRIES}")
+                if attempt >= POST_RETRIES:
+                    failed += 1
+                    with open(out_file, 'a', encoding='utf-8') as fo:
+                        fo.write(json.dumps({
+                            'status': 'failed',
+                            'record': processed_record,
+                            'error': str(e)
+                        }, default=str, ensure_ascii=False) + '\n')
+                    break
+                time.sleep(BACKOFF_BASE ** attempt)
+
+    logger.info(f"Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total")
+    return {'success': success, 'failed': failed, 'total': total}
+
+# --- Fim: funções para processamento do ExportacaoProducao.xlsx e envio ---
 
 def exportAtividadesStatus(driver):
     logger.info("Exportando atividades<>status...")
@@ -551,13 +738,9 @@ def executar_rotina():
         driver.quit()
         etapas.append("Driver finalizado")
         time.sleep(10)
-        dirOrigem = user_download_dir
-        dirDestino = destino_final_dir
-        os.makedirs(dirDestino, exist_ok=True)
-        subDiretorio = "histórico"
-        logger.info(f"Arquivos encontrados na pasta de download: {os.listdir(dirOrigem)}")
-        arquivos_xlsx = [f for f in os.listdir(dirOrigem) if f.lower().endswith('.xlsx')]
-        mover_arquivos(dirOrigem, arquivos_xlsx, dirDestino, subDiretorio)
+        # Conforme solicitado, NÃO mover arquivos baixados para outro diretório.
+        # Os arquivos permanecerão na pasta de Downloads do usuário.
+        logger.info(f"Arquivos baixados permanecerão em: {user_download_dir}")
         etapas.append("Arquivos processados")
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Finalizado em {data_atual}")
@@ -581,16 +764,18 @@ def executar_rotina():
 def agendar_execucao():
     schedule.every(30).minutes.do(executar_rotina)
 
-# Iniciar o agendamento
-agendar_execucao()
 
-# Executar a rotina uma vez antes de agendar
-executar_rotina()
+if __name__ == '__main__':
+    # Iniciar o agendamento apenas quando executado como script
+    agendar_execucao()
 
-while True:
-    agora = datetime.now().hour
-    if 8 <= agora < 22:
-        schedule.run_pending()  # Executa as tarefas agendadas
-        if not schedule.get_jobs():  # Verifica se não há tarefas agendadas
-            print("Aguardando a próxima execução...")
-    time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente
+    # Executar a rotina uma vez antes de agendar
+    executar_rotina()
+
+    while True:
+        agora = datetime.now().hour
+        if 8 <= agora < 22:
+            schedule.run_pending()  # Executa as tarefas agendadas
+            if not schedule.get_jobs():  # Verifica se não há tarefas agendadas
+                print("Aguardando a próxima execução...")
+        time.sleep(30)  # Aguarda 30 segundos antes de verificar novamente

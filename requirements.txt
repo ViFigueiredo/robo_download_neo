@@ -3,3 +3,5 @@ Requests
 schedule
 selenium
 pyinstaller
+openpyxl
+pandas
