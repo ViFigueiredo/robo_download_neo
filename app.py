@@ -438,8 +438,8 @@ def parse_export_producao(file_path):
 
 
 def post_records_to_nocodb(records):
-    """Envia registros para a API do NocoDB um por vez.
-
+    """Envia registros em batches com retry/backoff.
+    
     Respeita DRY_RUN (se true apenas loga payloads).
     """
     url = os.getenv('URL_TABELA_PRODUCAO')
@@ -457,12 +457,17 @@ def post_records_to_nocodb(records):
 
     success = 0
     failed = 0
-    total = len(records)
+    batches_total = 0
+    batches_failed = 0
 
-    logger.info(f"Iniciando envio de {total} registros para {url}")
+    def chunks(lst, n):
+        """Divide lista em chunks de tamanho n."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
 
+    # Processar todos os registros primeiro
+    processed_records = []
     for record in records:
-        # Garantir que todos os campos sejam strings válidas
         processed_record = {}
         for key, value in record.items():
             if value is None or str(value).lower() in ('none', 'nan', ''):
@@ -473,69 +478,103 @@ def post_records_to_nocodb(records):
                 processed_record[key] = str(value).replace(".0", "")
             else:
                 processed_record[key] = str(value).strip()
-        
-        logger.info(f"Processando registro: {json.dumps(processed_record, ensure_ascii=False)}")
+        processed_records.append(processed_record)
+
+    # Dividir em batches
+    batches = list(chunks(processed_records, BATCH_SIZE))
+    total_batches = len(batches)
+    logger.info(f"Iniciando envio de {len(processed_records)} registros em {total_batches} batches de até {BATCH_SIZE} registros cada")
+
+    # Processar cada batch
+    for batch_num, batch in enumerate(batches, 1):
+        batches_total += 1
+        logger.info(f"Processando batch {batch_num}/{total_batches} com {len(batch)} registros")
 
         if DRY_RUN:
-            logger.info(f"DRY_RUN ativo. Payload: {json.dumps(processed_record, ensure_ascii=False)}")
+            logger.info(f"DRY_RUN ativo. Payload batch {batch_num}: {json.dumps(batch[:1], ensure_ascii=False)} (...)")
             with open(out_file, 'a', encoding='utf-8') as fo:
-                fo.write(json.dumps({'status': 'DRY_RUN', 'payload': processed_record}, default=str, ensure_ascii=False) + '\n')
-            success += 1
+                for record in batch:
+                    fo.write(json.dumps({
+                        'status': 'DRY_RUN',
+                        'payload': record
+                    }, default=str, ensure_ascii=False) + '\n')
+            success += len(batch)
             continue
 
-        # Tentar enviar o registro
+        # Tentar enviar o batch
         attempt = 0
-        while attempt < POST_RETRIES:
+        batch_sent = False
+        while attempt < POST_RETRIES and not batch_sent:
             try:
-                logger.info(f"Tentativa {attempt + 1} de envio para {url}")
-                resp = requests.post(url, headers=headers, json=processed_record, timeout=60)
+                logger.info(f"Tentativa {attempt + 1} de envio do batch {batch_num}")
+                resp = requests.post(url, headers=headers, json=batch, timeout=60)
                 
                 if resp.status_code in (200, 201):
-                    success += 1
+                    success += len(batch)
+                    batch_sent = True
                     try:
                         resjson = resp.json()
                     except Exception:
                         resjson = {'raw_text': resp.text}
                     with open(out_file, 'a', encoding='utf-8') as fo:
-                        fo.write(json.dumps({
-                            'status': 'sent',
-                            'record': processed_record,
-                            'response': resjson
-                        }, default=str, ensure_ascii=False) + '\n')
+                        for record in batch:
+                            fo.write(json.dumps({
+                                'status': 'sent',
+                                'record': record,
+                                'response': resjson
+                            }, default=str, ensure_ascii=False) + '\n')
                     break
                 else:
                     attempt += 1
                     logger.warning(
-                        f"Falha no envio. Status={resp.status_code} "
+                        f"Falha no envio do batch {batch_num}. Status={resp.status_code} "
                         f"Response={resp.text} Tentativa={attempt}/{POST_RETRIES}"
                     )
                     if attempt >= POST_RETRIES:
-                        failed += 1
+                        failed += len(batch)
+                        batches_failed += 1
                         with open(out_file, 'a', encoding='utf-8') as fo:
-                            fo.write(json.dumps({
-                                'status': 'failed',
-                                'record': processed_record,
-                                'response_status': resp.status_code,
-                                'response_text': resp.text
-                            }, default=str, ensure_ascii=False) + '\n')
+                            for record in batch:
+                                fo.write(json.dumps({
+                                    'status': 'failed',
+                                    'record': record,
+                                    'response_status': resp.status_code,
+                                    'response_text': resp.text
+                                }, default=str, ensure_ascii=False) + '\n')
                     else:
                         time.sleep(BACKOFF_BASE ** attempt)
             except Exception as e:
                 attempt += 1
-                logger.error(f"Erro ao enviar: {e} tentativa={attempt}/{POST_RETRIES}")
+                logger.error(f"Erro ao enviar batch {batch_num}: {e} tentativa={attempt}/{POST_RETRIES}")
                 if attempt >= POST_RETRIES:
-                    failed += 1
+                    failed += len(batch)
+                    batches_failed += 1
                     with open(out_file, 'a', encoding='utf-8') as fo:
-                        fo.write(json.dumps({
-                            'status': 'failed',
-                            'record': processed_record,
-                            'error': str(e)
-                        }, default=str, ensure_ascii=False) + '\n')
+                        for record in batch:
+                            fo.write(json.dumps({
+                                'status': 'failed',
+                                'record': record,
+                                'error': str(e)
+                            }, default=str, ensure_ascii=False) + '\n')
                     break
                 time.sleep(BACKOFF_BASE ** attempt)
 
-    logger.info(f"Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total")
-    return {'success': success, 'failed': failed, 'total': total}
+        if batch_num < total_batches:
+            # Pequena pausa entre batches para não sobrecarregar a API
+            time.sleep(0.5)
+
+    total = success + failed
+    logger.info(
+        f"Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total "
+        f"({batches_failed} de {batches_total} batches falharam)"
+    )
+    return {
+        'success': success,
+        'failed': failed,
+        'total': total,
+        'batches_total': batches_total,
+        'batches_failed': batches_failed
+    }
 
 # --- Fim: funções para processamento do ExportacaoProducao.xlsx e envio ---
 
