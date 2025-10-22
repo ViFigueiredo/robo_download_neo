@@ -337,6 +337,24 @@ def realizar_download_atividades(driver, button_xpath):
     fechar_modal(driver)
     logger.info("Atividades baixadas com sucesso.")
 
+    # Após baixar, processar o arquivo e enviar para a API NocoDB
+    try:
+        # Determinar qual tabela usar baseado no nome do arquivo
+        is_status = 'status' in nome_arquivo.lower()
+        table_url_env = 'URL_TABELA_ATIVIDADES_STATUS' if is_status else 'URL_TABELA_ATIVIDADES'
+        table_url = os.getenv(table_url_env)
+        table_name = 'atividades_status' if is_status else 'atividades'
+        
+        if not table_url:
+            logger.warning(f"Variável {table_url_env} não configurada no .env. Pulando envio para {table_name}.")
+            return
+        
+        records = parse_export_producao(caminho_destino)
+        if records:
+            post_records_to_nocodb(records, table_url=table_url, table_name=table_name)
+    except Exception as e:
+        logger.error(f"Erro ao processar/enviar {nome_arquivo}: {e}")
+
 def realizar_download_producao(driver):
     logger.info("Realizando download de produção...")
     esperar_elemento(driver, XPATHS['producao']['download_link'], 'producao.download_link', 300)
@@ -371,8 +389,15 @@ def fechar_modal(driver):
 
 # --- Início: funções para processamento do ExportacaoProducao.xlsx e envio ---
 def parse_export_producao(file_path):
-    """Parse usando pandas: mapeia colunas e concatena colunas sem header em TAGS."""
+    """Parse flexível usando pandas: suporta diferentes planilhas mapeadas em `nocodb_map.json`.
+
+    Melhorias:
+    - Normaliza cabeçalhos (remove acentos, pontuação, lower) e faz matching tolerante com o mapeamento
+    - Tenta converter strings que parecem datas para formato `%Y-%m-%d %H:%M:%S`
+    - Mantém concatenação de colunas extras em `TAGS`
+    """
     import pandas as pd
+    import unicodedata
 
     nocodb_map_file = 'nocodb_map.json'
     if not os.path.exists(nocodb_map_file):
@@ -381,9 +406,22 @@ def parse_export_producao(file_path):
     with open(nocodb_map_file, 'r', encoding='utf-8') as f:
         mapping = json.load(f)
 
-    expected_headers = mapping.get(os.path.basename(file_path), [])
+    base_name = os.path.basename(file_path)
+    expected_headers = mapping.get(base_name, [])
     if not expected_headers:
-        logger.warning(f"Nenhum mapeamento encontrado em {nocodb_map_file} para {os.path.basename(file_path)}")
+        logger.warning(f"Nenhum mapeamento encontrado em {nocodb_map_file} para {base_name}")
+
+    def normalize_header(s):
+        if s is None:
+            return ''
+        s = str(s).strip().lower()
+        # Remove acentos
+        s = unicodedata.normalize('NFKD', s)
+        s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+        # Substitui caracteres não alfanuméricos por espaço
+        s = re.sub(r'[^a-z0-9]+', ' ', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
 
     # Ler a planilha com pandas
     try:
@@ -392,26 +430,61 @@ def parse_export_producao(file_path):
         logger.error(f"Erro ao ler Excel {file_path}: {e}")
         return []
 
-    # Normalizar cabeçalhos (string e strip)
+    # Preparar mapeamento tolerante entre cabeçalhos esperados e colunas reais
     df.columns = [str(c).strip() if pd.notna(c) else '' for c in df.columns]
+    real_columns = list(df.columns)
+
+    expected_norm_map = {normalize_header(h): h for h in expected_headers}
+    col_to_expected = {}
+
+    for col in real_columns:
+        norm = normalize_header(col)
+        if norm in expected_norm_map:
+            col_to_expected[col] = expected_norm_map[norm]
+        else:
+            # tentar match parcial (contain)
+            found = None
+            for en_norm, orig in expected_norm_map.items():
+                if en_norm and (en_norm in norm or norm in en_norm):
+                    found = orig
+                    break
+            if found:
+                col_to_expected[col] = found
+            else:
+                col_to_expected[col] = None  # será tratado como TAG extra
+
+    # Função utilitária para formatar valores
+    def format_value(val):
+        if pd.isna(val):
+            return ""
+        if isinstance(val, datetime):
+            return val.strftime("%Y-%m-%d %H:%M:%S")
+        # tentar converter strings que parecem datas
+        if isinstance(val, str):
+            val_str = val.strip()
+            if not val_str:
+                return ""
+            try:
+                parsed = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
+                if pd.notna(parsed):
+                    return parsed.to_pydatetime().strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+            return val_str
+        if isinstance(val, (int, float)):
+            return str(val).replace('.0', '')
+        return str(val)
 
     records = []
     for _, row in df.iterrows():
         rec = {}
         tags_extra = []
-        row_dict = row.to_dict()
-        for col, val in row_dict.items():
-            if col and col in expected_headers:
-                # Converter todos os valores para string adequadamente
-                if pd.isna(val):
-                    rec[col] = ""  # String vazia para valores nulos
-                elif isinstance(val, datetime):
-                    rec[col] = val.strftime("%Y-%m-%d %H:%M:%S")  # Formato consistente para datas
-                elif isinstance(val, (int, float)):
-                    rec[col] = str(val).replace(".0", "")  # Remove .0 de números inteiros
-                else:
-                    rec[col] = str(val).strip()  # Remove espaços e converte para string
+        for col, val in row.items():
+            mapped = col_to_expected.get(col)
+            if mapped:
+                rec[mapped] = format_value(val)
             else:
+                # coluna sem mapeamento -> adicionar às tags extras
                 if not pd.isna(val):
                     tags_extra.append(str(val).strip())
 
@@ -420,32 +493,36 @@ def parse_export_producao(file_path):
             if h not in rec or rec[h] is None:
                 rec[h] = ""
 
-        # Concatena tags
+        # Concatena tags no campo 'TAGS'
         if 'TAGS' in rec:
             existing = rec.get('TAGS', "")
             parts = []
             if existing:
                 parts.append(existing)
-            parts.extend(tags_extra)
+            parts.extend([t for t in tags_extra if t])
             rec['TAGS'] = ' | '.join(parts) if parts else ""
         else:
-            rec['TAGS'] = ' | '.join(tags_extra) if tags_extra else ""
+            rec['TAGS'] = ' | '.join([t for t in tags_extra if t]) if tags_extra else ""
 
         records.append(rec)
 
-    logger.info(f"Parsed {len(records)} registros de {file_path} (pandas)")
+    logger.info(f"Parsed {len(records)} registros de {file_path} (pandas, flex) usando mapeamento {base_name}")
     return records
 
-
-def post_records_to_nocodb(records):
+def post_records_to_nocodb(records, table_url=None, table_name='producao'):
     """Envia registros em batches com retry/backoff.
+    
+    Args:
+        records: lista de dicionários com registros a enviar
+        table_url: URL da tabela (default: lê URL_TABELA_PRODUCAO do .env)
+        table_name: nome da tabela para logs (default: 'producao')
     
     Respeita DRY_RUN (se true apenas loga payloads).
     """
-    url = os.getenv('URL_TABELA_PRODUCAO')
+    url = table_url or os.getenv('URL_TABELA_PRODUCAO')
     token = os.getenv('BEARER_TOKEN')
     if not url or not token:
-        raise ValueError('URL_TABELA_PRODUCAO e/ou BEARER_TOKEN não configurados no .env')
+        raise ValueError('URL da tabela e/ou BEARER_TOKEN não configurados no .env')
 
     headers = {
         'Authorization': f'Bearer {token}',
@@ -453,7 +530,7 @@ def post_records_to_nocodb(records):
     }
 
     os.makedirs('logs', exist_ok=True)
-    out_file = os.path.join('logs', 'sent_records.jsonl')
+    out_file = os.path.join('logs', f'sent_records_{table_name}.jsonl')
 
     success = 0
     failed = 0
@@ -483,15 +560,15 @@ def post_records_to_nocodb(records):
     # Dividir em batches
     batches = list(chunks(processed_records, BATCH_SIZE))
     total_batches = len(batches)
-    logger.info(f"Iniciando envio de {len(processed_records)} registros em {total_batches} batches de até {BATCH_SIZE} registros cada")
+    logger.info(f"[{table_name}] Iniciando envio de {len(processed_records)} registros em {total_batches} batches de até {BATCH_SIZE} registros cada")
 
     # Processar cada batch
     for batch_num, batch in enumerate(batches, 1):
         batches_total += 1
-        logger.info(f"Processando batch {batch_num}/{total_batches} com {len(batch)} registros")
+        logger.info(f"[{table_name}] Processando batch {batch_num}/{total_batches} com {len(batch)} registros")
 
         if DRY_RUN:
-            logger.info(f"DRY_RUN ativo. Payload batch {batch_num}: {json.dumps(batch[:1], ensure_ascii=False)} (...)")
+            logger.info(f"[{table_name}] DRY_RUN ativo. Payload batch {batch_num}: {json.dumps(batch[:1], ensure_ascii=False)} (...)")
             with open(out_file, 'a', encoding='utf-8') as fo:
                 for record in batch:
                     fo.write(json.dumps({
@@ -506,7 +583,7 @@ def post_records_to_nocodb(records):
         batch_sent = False
         while attempt < POST_RETRIES and not batch_sent:
             try:
-                logger.info(f"Tentativa {attempt + 1} de envio do batch {batch_num}")
+                logger.info(f"[{table_name}] Tentativa {attempt + 1} de envio do batch {batch_num}")
                 resp = requests.post(url, headers=headers, json=batch, timeout=60)
                 
                 if resp.status_code in (200, 201):
@@ -527,7 +604,7 @@ def post_records_to_nocodb(records):
                 else:
                     attempt += 1
                     logger.warning(
-                        f"Falha no envio do batch {batch_num}. Status={resp.status_code} "
+                        f"[{table_name}] Falha no envio do batch {batch_num}. Status={resp.status_code} "
                         f"Response={resp.text} Tentativa={attempt}/{POST_RETRIES}"
                     )
                     if attempt >= POST_RETRIES:
@@ -545,7 +622,7 @@ def post_records_to_nocodb(records):
                         time.sleep(BACKOFF_BASE ** attempt)
             except Exception as e:
                 attempt += 1
-                logger.error(f"Erro ao enviar batch {batch_num}: {e} tentativa={attempt}/{POST_RETRIES}")
+                logger.error(f"[{table_name}] Erro ao enviar batch {batch_num}: {e} tentativa={attempt}/{POST_RETRIES}")
                 if attempt >= POST_RETRIES:
                     failed += len(batch)
                     batches_failed += 1
@@ -565,7 +642,7 @@ def post_records_to_nocodb(records):
 
     total = success + failed
     logger.info(
-        f"Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total "
+        f"[{table_name}] Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total "
         f"({batches_failed} de {batches_total} batches falharam)"
     )
     return {

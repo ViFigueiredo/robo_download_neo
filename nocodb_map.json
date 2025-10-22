@@ -52,7 +52,7 @@
         "INSTANCIA",
         "TAGS"
     ],
-    "ExportacaoAtividade.xlsx": [
+    "Exportacao Atividade.xlsx": [
         "ATIVIDADE",
         "VINCULADO",
         "LOGIN",
@@ -77,7 +77,7 @@
         "RETORNO FUTURO",
         "COMPLEMENTOS"
     ],
-    "ExportacaoStatus.xlsx": [
+    "Exportacao Status.xlsx": [
         "NUMERO",
         "ETAPA",
         "PRAZO",

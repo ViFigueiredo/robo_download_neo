@@ -4,6 +4,7 @@ logs
 element_screenshots/
 *.zip
 *.rar
+json/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
