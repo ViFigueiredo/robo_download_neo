@@ -67,7 +67,7 @@ secret_otp = os.getenv("SYS_SECRET_OTP")
 destino_final_dir = os.getenv("DESTINO_FINAL_DIR")
 browser = os.getenv("BROWSER")
 print(f"Valor lido de BROWSER no .env: {browser!r}")
-browser = browser.strip().replace('"','').replace("'","").lower()
+browser = (browser or "").strip().replace('"','').replace("'","").lower()
 headless = os.getenv("HEADLESS", "false").lower() == "true"
 otp_url = os.getenv("OTP_URL", "http://localhost:8000/generate_otp")
 
@@ -316,6 +316,8 @@ def inserir_texto(driver, xpath, texto, referencia_map=None):
 
 def realizar_download_atividades(driver, button_xpath):
     logger.info("Realizando download de atividades...")
+    # Limpa arquivos antigos semelhantes antes de iniciar um novo download
+    limpar_arquivos_antigos_downloads()
     clicar_elemento(driver, button_xpath, 'atividades.export_atividades_button')
     esperar_elemento(driver, XPATHS['atividades']['input_code_field'], 'atividades.input_code_field')
     codigo_elemento = esperar_elemento(driver, XPATHS['atividades']['code_field'], 'atividades.code_field')
@@ -351,12 +353,17 @@ def realizar_download_atividades(driver, button_xpath):
         
         records = parse_export_producao(caminho_destino)
         if records:
-            post_records_to_nocodb(records, table_url=table_url, table_name=table_name)
+            inicio = time.time()
+            stats = post_records_to_nocodb(records, table_url=table_url, table_name=table_name)
+            duracao = time.time() - inicio
+            registrar_resumo_envio(table_name, caminho_destino, stats, duracao)
     except Exception as e:
         logger.error(f"Erro ao processar/enviar {nome_arquivo}: {e}")
 
 def realizar_download_producao(driver):
     logger.info("Realizando download de produção...")
+    # Limpa arquivos antigos semelhantes antes de iniciar um novo download
+    limpar_arquivos_antigos_downloads()
     esperar_elemento(driver, XPATHS['producao']['download_link'], 'producao.download_link', 300)
     elemento_download = esperar_download_pronto(driver, XPATHS['producao']['download_link'], 'producao.download_link')
     url_download = elemento_download.get_attribute('href')
@@ -371,7 +378,10 @@ def realizar_download_producao(driver):
     try:
         records = parse_export_producao(caminho_destino)
         if records:
-            post_records_to_nocodb(records)
+            inicio = time.time()
+            stats = post_records_to_nocodb(records)
+            duracao = time.time() - inicio
+            registrar_resumo_envio('producao', caminho_destino, stats, duracao)
     except Exception as e:
         logger.error(f"Erro ao processar/enviar ExportacaoProducao.xlsx: {e}")
 
@@ -385,6 +395,112 @@ def fechar_modal(driver):
             # print("Modal fechado.")
     except Exception:
         print("Nenhum modal aberto.")
+
+
+# Utilitário: limpeza robusta da pasta de Downloads antes de iniciar cada download
+def limpar_arquivos_antigos_downloads(palavras=None, padroes_regex=None, extensoes=(".xlsx",)):
+    """Remove arquivos antigos na pasta Downloads que combinem com palavras-chave ou padrões.
+
+    - palavras: lista de palavras-chave para buscar no nome (normalizadas: sem acento, minúsculas)
+    - padroes_regex: lista de padrões regex a testar no nome do arquivo
+    - extensoes: tupla de extensões alvo (default: .xlsx)
+
+    Retorna o número de arquivos removidos.
+    """
+    import unicodedata
+
+    def normalizar_nome(s):
+        s = s or ""
+        s = s.lower()
+        s = unicodedata.normalize('NFKD', s)
+        s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+        s = re.sub(r'[^a-z0-9]+', ' ', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    # Defaults de palavras/padrões comuns aos relatórios
+    if palavras is None:
+        palavras = [
+            'exportacao', 'exportacao producao', 'producao',
+            'exportacao atividades', 'atividades',
+            'exportacao status', 'status', 'vivo'
+        ]
+    if padroes_regex is None:
+        padroes_regex = [r'^exportacao.*']
+
+    palavras_norm = [normalizar_nome(p) for p in palavras if p]
+    regexes = []
+    for p in padroes_regex:
+        try:
+            regexes.append(re.compile(p, flags=re.IGNORECASE))
+        except Exception:
+            pass
+
+    downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+    removidos = 0
+    try:
+        for nome in os.listdir(downloads):
+            caminho = os.path.join(downloads, nome)
+            if not os.path.isfile(caminho):
+                continue
+            _, ext = os.path.splitext(nome)
+            if extensoes and ext.lower() not in [e.lower() for e in extensoes]:
+                # Filtra por extensão alvo
+                continue
+
+            nome_norm = normalizar_nome(nome)
+            combina_palavra = any(p in nome_norm for p in palavras_norm)
+            combina_regex = any(rx.search(nome) for rx in regexes)
+
+            if combina_palavra or combina_regex:
+                try:
+                    os.remove(caminho)
+                    removidos += 1
+                    logger.info(f"Arquivo antigo removido da Downloads: {nome}")
+                except PermissionError as e:
+                    logger.warning(f"⚠️ Não foi possível remover (em uso): {nome} - {e}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao remover arquivo antigo: {nome} - {e}")
+    except FileNotFoundError:
+        os.makedirs(downloads, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao varrer Downloads: {e}")
+
+    if removidos:
+        logger.info(f"Limpeza de Downloads concluída: {removidos} arquivo(s) removido(s)")
+    else:
+        logger.info("Limpeza de Downloads: nenhum arquivo alvo encontrado")
+    return removidos
+
+
+# Utilitário: registrar resumo de envio por arquivo/tabela
+def registrar_resumo_envio(table_name, file_path, stats, elapsed_seconds):
+    """Grava um resumo do envio em logs/envios_resumo.jsonl e loga no console.
+
+    stats esperado: dict com chaves success, failed, total, batches_total, batches_failed.
+    """
+    try:
+        os.makedirs('logs', exist_ok=True)
+        resumo_path = os.path.join('logs', 'envios_resumo.jsonl')
+        payload = {
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'table': table_name,
+            'file': os.path.basename(file_path) if file_path else None,
+            'elapsed_seconds': round(float(elapsed_seconds or 0), 3),
+            'success': int(stats.get('success', 0)) if isinstance(stats, dict) else None,
+            'failed': int(stats.get('failed', 0)) if isinstance(stats, dict) else None,
+            'total': int(stats.get('total', 0)) if isinstance(stats, dict) else None,
+            'batches_total': int(stats.get('batches_total', 0)) if isinstance(stats, dict) else None,
+            'batches_failed': int(stats.get('batches_failed', 0)) if isinstance(stats, dict) else None,
+        }
+        with open(resumo_path, 'a', encoding='utf-8') as fo:
+            fo.write(json.dumps(payload, ensure_ascii=False) + '\n')
+        logger.info(
+            f"[Resumo envio] tabela={table_name} arquivo={payload['file']} total={payload['total']} "
+            f"sucesso={payload['success']} falha={payload['failed']} tempo={payload['elapsed_seconds']}s"
+        )
+    except Exception as e:
+        logger.warning(f"Falha ao registrar resumo de envio: {e}")
 
 
 # --- Início: funções para processamento do ExportacaoProducao.xlsx e envio ---
@@ -809,20 +925,9 @@ def executar_rotina():
                 except Exception as e:
                     logger.warning(f"⚠️ Não foi possível remover screenshot: {arquivo.name} - {e}")
         
-        user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        palavras_chave = ["atividades", "status", "produção"]
-        for f in os.listdir(user_download_dir):
-            if any(palavra in f.lower() for palavra in palavras_chave):
-                file_path = os.path.join(user_download_dir, f)
-                if os.path.isfile(file_path):
-                    try:
-                        os.remove(file_path)
-                        logger.info(f"Arquivo antigo removido: {f}")
-                    except PermissionError as e:
-                        logger.warning(f"⚠️ Não foi possível remover arquivo antigo (em uso): {f}")
-                        logger.warning(f"⚠️ Detalhes: {e}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Erro ao remover arquivo antigo: {f} - {e}")
+        # Limpeza robusta da pasta Downloads antes de qualquer novo download
+        removidos = limpar_arquivos_antigos_downloads()
+        logger.info(f"Limpeza inicial de Downloads: {removidos} arquivo(s) removidos")
         etapas.append("Driver iniciado")
         driver = iniciar_driver()
         etapas.append("Login realizado")
@@ -856,7 +961,8 @@ def executar_rotina():
         time.sleep(10)
         # Conforme solicitado, NÃO mover arquivos baixados para outro diretório.
         # Os arquivos permanecerão na pasta de Downloads do usuário.
-        logger.info(f"Arquivos baixados permanecerão em: {user_download_dir}")
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        logger.info(f"Arquivos baixados permanecerão em: {downloads_dir}")
         etapas.append("Arquivos processados")
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Finalizado em {data_atual}")

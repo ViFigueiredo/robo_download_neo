@@ -34,7 +34,7 @@ if args.token is not None:
     os.environ['BEARER_TOKEN'] = args.token
 
 # Agora importamos a função do módulo app
-from app import post_records_to_nocodb
+from app import post_records_to_nocodb, registrar_resumo_envio
 
 # Descobrir arquivo JSON se não foi informado
 if args.file:
@@ -63,12 +63,18 @@ with open(file_path, 'r', encoding='utf-8') as f:
 print(f"Carregados {len(records)} registros de {file_path}")
 
 # Chamar a função de envio do app
+import time
 try:
+    inicio = time.time()
     result = post_records_to_nocodb(records)
+    duracao = time.time() - inicio
     print('Envio (ou simulação) finalizado. Verifique logs/sent_records.jsonl e robo_download.log')
     if isinstance(result, dict):
         print('Resumo:')
         print(json.dumps(result, indent=2, ensure_ascii=False))
+        # Grava também o resumo de envio
+        registrar_resumo_envio('producao', str(file_path), result, duracao)
+        print(f'Resumo gravado em logs/envios_resumo.jsonl')
 except Exception as e:
     print(f'Erro ao executar post_records_to_nocodb: {e}')
     raise
