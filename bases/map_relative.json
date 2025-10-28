@@ -21,6 +21,7 @@
         "code_field": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/div",
         "input_code_field": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-number-field/input",
         "confirm_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-horizontal-layout/vaadin-button[2]",
+        "arquivo_disponivel_indicator": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/h5",
         "download_link": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/a",
         "download_button": "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]",
         "close_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button"
@@ -31,6 +32,7 @@
         "combo_box": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-combo-box[1]/input",
         "radio_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-radio-group/vaadin-radio-button[8]/input",
         "search_button": "/html/body/div[1]/flow-container-root-2521314/vaadin-app-layout/vaadin-vertical-layout/vaadin-scroller/div/vaadin-horizontal-layout/vaadin-button",
+        "arquivo_disponivel_indicator": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/h5",
         "download_link": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/a",
         "download_button": "//vaadin-vertical-layout//a[contains(@title, 'Baixar arquivo processado')]",
         "close_button": "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/vaadin-button"

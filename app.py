@@ -1,4 +1,4 @@
-import requests, time, os, shutil, schedule, json, re
+import requests, time, os, shutil, schedule, json, re, pyodbc
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
@@ -13,9 +13,13 @@ import sys
 from pathlib import Path
 from selenium.common.exceptions import ElementClickInterceptedException
 
+# Criar pasta de logs se não existir
+logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(logs_dir, exist_ok=True)
+
 # Configuração de logging
 logging.basicConfig(
-    filename='robo_download.log',
+    filename=os.path.join(logs_dir, 'robo_download.log'),
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -48,16 +52,30 @@ def checar_variaveis_obrigatorias(vars_list):
 
 checar_variaveis_obrigatorias([
     'SYS_URL', 'SYS_USERNAME', 'SYS_PASSWORD', 'SYS_SECRET_OTP', 'DESTINO_FINAL_DIR',
-    'BROWSER', 'RETRIES_DOWNLOAD', 'TIMEOUT_DOWNLOAD', 'HEADLESS', 'OTP_URL'
+    'BROWSER', 'RETRIES_DOWNLOAD', 'TIMEOUT_DOWNLOAD', 'HEADLESS', 'OTP_URL',
+    'DB_SERVER', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DRIVER'
 ])
 
 # Timeouts configuráveis
 TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
 RETRIES_DOWNLOAD = int(os.getenv('RETRIES_DOWNLOAD', '3'))
+DOWNLOAD_RETRY_DELAY = int(os.getenv('DOWNLOAD_RETRY_DELAY', '120'))  # ✅ NOVO: Delay entre tentativas (padrão: 120s)
+
+# Diretório de downloads - usar pasta do projeto por padrão
+DOWNLOADS_DIR = os.getenv('DOWNLOADS_DIR', os.path.join(os.path.dirname(__file__), 'downloads'))
+os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 # Carrega os XPaths do arquivo map_relative.json (XPaths relativos mais robustos)
-with open('map_relative.json', 'r') as f:
+# Sempre carrega de \bases\
+map_relative_file = os.path.join(os.path.dirname(__file__), 'bases', 'map_relative.json')
+if not os.path.exists(map_relative_file):
+    print(f"Arquivo map_relative.json não encontrado em: {map_relative_file}")
+    sys.exit(1)
+
+with open(map_relative_file, 'r', encoding='utf-8') as f:
     XPATHS = json.load(f)
+
+logger.info(f"Mapeamento de XPaths carregado de: {map_relative_file}")
 
 # Acessando as variáveis
 url = os.getenv("SYS_URL")
@@ -83,8 +101,8 @@ logger.info(f"Valor de url: {url!r}")
 
 def iniciar_driver():
     logger.info(f"Iniciando driver do navegador... ({browser})")
-    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-    os.makedirs(user_download_dir, exist_ok=True)
+    logger.info(f"Downloads serão salvos em: {DOWNLOADS_DIR}")
+    
     driver = None
     if browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -95,7 +113,7 @@ def iniciar_driver():
         options.add_argument("--log-level=3")
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
         prefs = {
-            "download.default_directory": user_download_dir,
+            "download.default_directory": DOWNLOADS_DIR,
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True
@@ -109,7 +127,7 @@ def iniciar_driver():
         if headless:
             options.add_argument("--headless=new")
         prefs = {
-            "download.default_directory": user_download_dir,
+            "download.default_directory": DOWNLOADS_DIR,
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True
@@ -134,7 +152,7 @@ def encontrar_elemento(driver, xpath, referencia_map=None, tempo=10):
     except Exception:
         msg = f"Elemento não encontrado para XPath: {xpath}"
         if referencia_map:
-            msg += f" (referência map.json: {referencia_map})"
+            msg += f" (referência map_relative.json: {referencia_map})"
         logger.error(msg)
         send_notification(msg)
         return None
@@ -142,53 +160,21 @@ def encontrar_elemento(driver, xpath, referencia_map=None, tempo=10):
 def esperar_elemento(driver, xpath, referencia_map=None, tempo=300):
     elemento = encontrar_elemento(driver, xpath, referencia_map, tempo)
     if not elemento:
-        raise Exception(f"Elemento não encontrado: {xpath} (referência map.json: {referencia_map})")
+        raise Exception(f"Elemento não encontrado: {xpath} (referência map_relative.json: {referencia_map})")
     return elemento
-
-def salvar_screenshot_elemento(driver, elemento, referencia_map=None):
-    from pathlib import Path
-    import datetime
-    screenshots_dir = Path('element_screenshots')
-    screenshots_dir.mkdir(exist_ok=True)
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    ref = referencia_map.replace('.', '_') if referencia_map else 'elemento'
-    filename = f'{ref}_{timestamp}.png'
-    filepath = screenshots_dir / filename
-    try:
-        # Tentar atualizar a referência do elemento se ele estiver stale
-        if referencia_map and hasattr(elemento, 'find_element'):
-            try:
-                elemento.is_displayed()  # Testa se o elemento está stale
-            except:
-                # Se estiver stale, tenta encontrar o elemento novamente usando o xpath original
-                xpath = XPATHS
-                for key in referencia_map.split('.'):
-                    xpath = xpath[key]
-                elemento = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, xpath))
-                )
-        
-        driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
-        time.sleep(0.5)  # Pequena pausa para garantir que o elemento está visível
-        elemento.screenshot(str(filepath))
-        logger.info(f"Screenshot do elemento salvo em: {filepath}")
-    except Exception as e:
-        logger.warning(f"Falha ao salvar screenshot do elemento: {e}")
 
 def clicar_elemento(driver, xpath, referencia_map=None):
     try:
         elemento = encontrar_elemento(driver, xpath, referencia_map)
         if elemento:
-            salvar_screenshot_elemento(driver, elemento, referencia_map)
             elemento.click()
     except ElementClickInterceptedException as e:
-        logger.warning(f"Click interceptado em {xpath} (referência map.json: {referencia_map}). Tentando pressionar ESC para fechar overlay.")
+        logger.warning(f"Click interceptado em {xpath} (referência map_relative.json: {referencia_map}). Tentando pressionar ESC para fechar overlay.")
         driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
         time.sleep(1)
         try:
             elemento = encontrar_elemento(driver, xpath, referencia_map)
             if elemento:
-                salvar_screenshot_elemento(driver, elemento, referencia_map)
                 elemento.click()
         except Exception as e2:
             logger.error(f"Falha ao clicar após ESC: {e2}")
@@ -199,17 +185,22 @@ def clicar_elemento_real(driver, xpath, referencia_map=None):
     try:
         elemento = encontrar_elemento(driver, xpath, referencia_map, tempo=30)
         if elemento:
-            salvar_screenshot_elemento(driver, elemento, referencia_map)
-            driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
-            ActionChains(driver).move_to_element(elemento).click().perform()
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+                ActionChains(driver).move_to_element(elemento).click().perform()
+            except Exception:
+                # Se falhar com o elemento, tentar encontrar novamente
+                elemento = encontrar_elemento(driver, xpath, referencia_map, tempo=5)
+                if elemento:
+                    driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
+                    ActionChains(driver).move_to_element(elemento).click().perform()
     except ElementClickInterceptedException as e:
-        logger.warning(f"Click interceptado em {xpath} (referência map.json: {referencia_map}). Tentando pressionar ESC para fechar overlay.")
+        logger.warning(f"Click interceptado em {xpath} (referência map_relative.json: {referencia_map}). Tentando pressionar ESC para fechar overlay.")
         driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
         time.sleep(1)
         try:
             elemento = encontrar_elemento(driver, xpath, referencia_map, tempo=30)
             if elemento:
-                salvar_screenshot_elemento(driver, elemento, referencia_map)
                 driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
                 ActionChains(driver).move_to_element(elemento).click().perform()
         except Exception as e2:
@@ -227,6 +218,292 @@ def gerar_otp():
     else:
         print(f"Erro ao gerar OTP: {response.status_code} - {response.text}")
         exit(1)
+
+# --- Início: funções para conexão e envio ao SQL Server ---
+
+def get_mssql_connection():
+    """Cria e retorna uma conexão com SQL Server usando credenciais do .env."""
+    try:
+        db_server = os.getenv('DB_SERVER')
+        db_database = os.getenv('DB_DATABASE')
+        db_username = os.getenv('DB_USERNAME')
+        db_password = os.getenv('DB_PASSWORD')
+        db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server')
+        
+        conn_string = (
+            f'Driver={{{db_driver}}};'
+            f'Server={db_server};'
+            f'Database={db_database};'
+            f'UID={db_username};'
+            f'PWD={db_password};'
+            f'Encrypt=no;TrustServerCertificate=no;Connection Timeout=30;'
+        )
+        
+        connection = pyodbc.connect(conn_string)
+        logger.info(f"Conexão com SQL Server estabelecida: {db_server}/{db_database}")
+        return connection
+    except Exception as e:
+        msg = f"Erro ao conectar ao SQL Server: {e}"
+        logger.error(msg)
+        send_notification(msg)
+        raise
+
+def post_records_to_mssql(records, table_name='producao', file_name=None):
+    """Envia registros para SQL Server em batches com retry/backoff.
+    
+    Args:
+        records: lista de dicionários com registros a enviar
+        table_name: nome da tabela para logs (default: 'producao')
+        file_name: nome do arquivo para rastreamento
+    
+    Respeita DRY_RUN (se true apenas loga payloads).
+    """
+    # Carregar mapa SQL
+    # Sempre carrega de \bases\
+    sql_map_file = os.path.join(os.path.dirname(__file__), 'bases', 'sql_map.json')
+    if not os.path.exists(sql_map_file):
+        raise FileNotFoundError(f"Arquivo sql_map.json não encontrado em: {sql_map_file}")
+    
+    with open(sql_map_file, 'r', encoding='utf-8') as f:
+        sql_map = json.load(f)
+    
+    # Determinar nome da tabela SQL
+    base_file_name = os.path.basename(file_name) if file_name else f"{table_name}.xlsx"
+    map_entry = sql_map.get(base_file_name)
+    
+    if not map_entry:
+        logger.warning(f"Nenhum mapeamento encontrado em {sql_map_file} para {base_file_name}")
+        return {
+            'success': 0,
+            'failed': len(records),
+            'total': len(records),
+            'batches_total': 0,
+            'batches_failed': 0
+        }
+    
+    sql_table = map_entry.get('tabela')
+    expected_columns = map_entry.get('colunas', [])
+    
+    os.makedirs('logs', exist_ok=True)
+    out_file = os.path.join('logs', f'sent_records_{table_name}.jsonl')
+    
+    success = 0
+    failed = 0
+    batches_total = 0
+    batches_failed = 0
+    
+    def chunks(lst, n):
+        """Divide lista em chunks de tamanho n."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+    
+    # Processar todos os registros primeiro
+    processed_records = []
+    for record in records:
+        processed_record = {}
+        for key, value in record.items():
+            if value is None or str(value).lower() in ('none', 'nan', ''):
+                processed_record[key] = ""
+            elif isinstance(value, datetime):
+                processed_record[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(value, (int, float)):
+                processed_record[key] = str(value).replace(".0", "")
+            else:
+                processed_record[key] = str(value).strip()
+        processed_records.append(processed_record)
+    
+    # Dividir em batches
+    batches = list(chunks(processed_records, BATCH_SIZE))
+    total_batches = len(batches)
+    logger.info(f"[{table_name}] Iniciando envio de {len(processed_records)} registros para tabela '{sql_table}' em {total_batches} batches de até {BATCH_SIZE} registros cada")
+    
+    # Processar cada batch
+    for batch_num, batch in enumerate(batches, 1):
+        batches_total += 1
+        logger.info(f"[{table_name}] Processando batch {batch_num}/{total_batches} com {len(batch)} registros")
+        
+        if DRY_RUN:
+            logger.info(f"[{table_name}] DRY_RUN ativo. Payload batch {batch_num}: {json.dumps(batch[:1], ensure_ascii=False, default=str)} (...)")
+            with open(out_file, 'a', encoding='utf-8') as fo:
+                for record in batch:
+                    fo.write(json.dumps({
+                        'status': 'DRY_RUN',
+                        'payload': record
+                    }, default=str, ensure_ascii=False) + '\n')
+            success += len(batch)
+            continue
+        
+        # Tentar enviar o batch
+        attempt = 0
+        batch_sent = False
+        while attempt < POST_RETRIES and not batch_sent:
+            try:
+                connection = get_mssql_connection()
+                cursor = connection.cursor()
+                
+                logger.info(f"[{table_name}] Tentativa {attempt + 1} de envio do batch {batch_num}")
+                
+                # Preparar INSERT statement
+                columns = ', '.join(f'[{col}]' for col in expected_columns)
+                placeholders = ', '.join(['?' for _ in expected_columns])
+                insert_stmt = f"INSERT INTO [{sql_table}] ({columns}) VALUES ({placeholders})"
+                
+                # Inserir registros - tratando erros de integridade individualmente
+                batch_success_count = 0
+                batch_duplicate_count = 0
+                batch_error_count = 0
+                
+                for idx, record in enumerate(batch, 1):
+                    # Extrair informações da linha para logging
+                    line_number = record.pop('_line_number', '?')
+                    file_name = record.pop('_file_name', '?')
+                    
+                    values = [record.get(col, '') for col in expected_columns]
+                    try:
+                        cursor.execute(insert_stmt, values)
+                        batch_success_count += 1
+                    except pyodbc.IntegrityError as ie:
+                        batch_duplicate_count += 1
+                        error_msg = str(ie)
+                        if 'PRIMARY KEY' in error_msg or 'UNIQUE' in error_msg:
+                            # Extrair valor da primeira coluna para identificação
+                            id_col = expected_columns[0] if expected_columns else 'N/A'
+                            id_val = record.get(id_col, 'N/A')
+                            logger.debug(
+                                f"[{table_name}] ⚠️  DUPLICATA no batch {batch_num}, registro {idx} "
+                                f"(Linha {line_number} de {file_name}): "
+                                f"Chave primária '{id_col}={id_val}' já existe"
+                            )
+                        else:
+                            logger.warning(
+                                f"[{table_name}] Erro de integridade no batch {batch_num}, registro {idx} "
+                                f"(Linha {line_number} de {file_name}): {error_msg[:100]}"
+                            )
+                    except Exception as record_error:
+                        batch_error_count += 1
+                        # Criar resumo do registro para melhor debug
+                        rec_preview = {k: v[:50] if isinstance(v, str) and len(v) > 50 else v 
+                                      for k, v in list(record.items())[:3]}  # Primeiras 3 colunas
+                        logger.warning(
+                            f"[{table_name}] ❌ ERRO ao inserir registro {idx} do batch {batch_num} "
+                            f"(Linha {line_number} de {file_name}): {type(record_error).__name__}\n"
+                            f"    Detalhes: {str(record_error)[:150]}\n"
+                            f"    Dados: {rec_preview}"
+                        )
+                
+                connection.commit()
+                success += batch_success_count
+                failed += (batch_duplicate_count + batch_error_count)
+                batch_sent = True
+                
+                if batch_success_count > 0:
+                    logger.info(
+                        f"[{table_name}] ✅ Batch {batch_num} processado: {batch_success_count} inseridos, "
+                        f"{batch_duplicate_count} duplicatas ignoradas, {batch_error_count} erros"
+                    )
+                else:
+                    logger.warning(
+                        f"[{table_name}] ⚠️  Batch {batch_num} falhou: {batch_duplicate_count} duplicatas, {batch_error_count} erros, 0 inseridos"
+                    )
+                
+                with open(out_file, 'a', encoding='utf-8') as fo:
+                    for idx, record in enumerate(batch, 1):
+                        # Adicionar metadados de rastreamento
+                        line_number = record.get('_line_number', '?')
+                        file_name = record.get('_file_name', '?')
+                        # Remover campos internos antes de logar
+                        record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
+                        fo.write(json.dumps({
+                            'status': 'sent',
+                            'table': sql_table,
+                            'record': record_clean,
+                            'source': {
+                                'file': file_name,
+                                'line': line_number
+                            },
+                            'batch_num': batch_num,
+                            'record_num': idx,
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }, default=str, ensure_ascii=False) + '\n')
+                
+                cursor.close()
+                connection.close()
+                break
+                
+            except Exception as e:
+                attempt += 1
+                logger.error(f"[{table_name}] Erro ao enviar batch {batch_num}: {e} tentativa={attempt}/{POST_RETRIES}")
+                logger.debug(f"[{table_name}] Detalhes do erro: {type(e).__name__} - {str(e)}")
+                
+                if attempt >= POST_RETRIES:
+                    failed += len(batch)
+                    batches_failed += 1
+                    logger.error(
+                        f"[{table_name}] ❌ FALHA NO BATCH {batch_num}: Excedido limite de {POST_RETRIES} tentativas. "
+                        f"{len(batch)} registros não foram inseridos. Erro: {type(e).__name__} - {str(e)[:200]}"
+                    )
+                    
+                    with open(out_file, 'a', encoding='utf-8') as fo:
+                        for idx, record in enumerate(batch, 1):
+                            line_number = record.get('_line_number', '?')
+                            file_name = record.get('_file_name', '?')
+                            record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
+                            fo.write(json.dumps({
+                                'status': 'failed',
+                                'batch_num': batch_num,
+                                'record_num': idx,
+                                'table': sql_table,
+                                'record': record_clean,
+                                'source': {
+                                    'file': file_name,
+                                    'line': line_number
+                                },
+                                'error': str(e),
+                                'error_type': type(e).__name__,
+                                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            }, default=str, ensure_ascii=False) + '\n')
+                    break
+                else:
+                    wait_time = BACKOFF_BASE ** attempt
+                    time.sleep(wait_time)
+                    logger.info(f"[{table_name}] ⏳ Retry {attempt}/{POST_RETRIES}: Aguardando {wait_time:.1f}s antes de nova tentativa...")
+        
+        if batch_num < total_batches:
+            # Pequena pausa entre batches para não sobrecarregar o servidor
+            time.sleep(0.5)
+    
+    total = success + failed
+    logger.info(
+        f"[{table_name}] Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total "
+        f"({batches_failed} de {batches_total} batches falharam)"
+    )
+    
+    # Log resumido com detalhes estatísticos
+    taxa_sucesso = (success / total * 100) if total > 0 else 0
+    taxa_batches_sucesso = ((batches_total - batches_failed) / batches_total * 100) if batches_total > 0 else 0
+    
+    logger.info(
+        f"[{table_name}] 📊 ESTATÍSTICAS: "
+        f"Taxa de sucesso de registros: {taxa_sucesso:.1f}% | "
+        f"Batches bem-sucedidos: {batches_total - batches_failed}/{batches_total} ({taxa_batches_sucesso:.1f}%) | "
+        f"Registros: {success}/{total}"
+    )
+    
+    if batches_failed > 0:
+        logger.warning(
+            f"[{table_name}] ⚠️  ATENÇÃO: {batches_failed} batch(es) falharam com {failed} registros não inseridos. "
+            f"Verifique {out_file} para mais detalhes."
+        )
+    
+    return {
+        'success': success,
+        'failed': failed,
+        'total': total,
+        'batches_total': batches_total,
+        'batches_failed': batches_failed
+    }
+
+# --- Fim: funções para conexão e envio ao SQL Server ---
 
 def selecionar_data(driver, xpath, data, referencia_map=None):
     elemento = esperar_elemento(driver, xpath, referencia_map)
@@ -277,113 +554,196 @@ def esperar_download_pronto(driver, xpath, referencia_map=None, timeout=60):
         except Exception:
             pass
         time.sleep(1)
-    msg = f"Link de download não ficou pronto a tempo: {xpath} (referência map.json: {referencia_map})"
+    msg = f"Link de download não ficou pronto a tempo: {xpath} (referência map_relative.json: {referencia_map})"
     logger.error(msg)
     send_notification(msg)
     raise Exception(msg)
 
+def aguardar_arquivo_disponivel(driver, timeout=300):
+    """
+    Aguarda o elemento h5 com texto 'Arquivo disponível' aparecer no modal.
+    Isso indica que o arquivo foi processado e está pronto para download.
+    
+    XPath: /html/body/vaadin-dialog-overlay/vaadin-vertical-layout/h5
+    Conteúdo esperado: "Arquivo disponível"
+    
+    Args:
+        driver: Selenium driver
+        timeout: Timeout em segundos (default: 300 = 5 minutos)
+    
+    Returns:
+        True se encontrou, lança exception se timeout
+    """
+    logger.info(f"⏳ Aguardando elemento 'Arquivo disponível' (timeout: {timeout}s)...")
+    
+    xpath_arquivo_disponivel = "/html/body/vaadin-dialog-overlay/vaadin-vertical-layout/h5"
+    
+    try:
+        # Aguardar que o elemento apareça
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.XPATH, xpath_arquivo_disponivel))
+        )
+        
+        # Verificar se o texto contém "Arquivo disponível"
+        elemento = driver.find_element(By.XPATH, xpath_arquivo_disponivel)
+        texto = elemento.text.strip()
+        
+        logger.info(f"✅ Elemento encontrado: '{texto}'")
+        
+        if "Arquivo disponível" in texto or "disponível" in texto.lower():
+            logger.info("✅ Arquivo está pronto para download!")
+            return True
+        else:
+            logger.warning(f"⚠️ Elemento encontrado mas texto inesperado: '{texto}'")
+            return True  # Mesmo assim retorna True, pois o elemento existe
+            
+    except Exception as e:
+        logger.error(f"❌ Timeout esperando 'Arquivo disponível': {e}")
+        raise Exception(f"Arquivo não foi processado no tempo esperado ({timeout}s): {e}")
+
 def baixar_arquivo_com_cookies(driver, url, caminho_destino):
     import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    
     cookies = driver.get_cookies()
     s = requests.Session()
+    
+    # ✅ NOVO: Configurar retry automático para SSLError e timeouts
+    # Essa configuração faz o requests automaticamente tentar novamente em caso de erro SSL
+    retry_strategy = Retry(
+        total=2,  # Total de retries automáticos (além dos retries manuais)
+        status_forcelist=[429, 500, 502, 503, 504],  # Status codes que devem fazer retry
+        allowed_methods=["GET"],
+        backoff_factor=1  # Esperar 1s, depois 2s, depois 4s entre retries
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    
     for cookie in cookies:
         s.cookies.set(cookie['name'], cookie['value'])
+    
     for tentativa in range(1, RETRIES_DOWNLOAD+1):
         try:
-            logger.info(f'Tentando baixar arquivo: {url} (tentativa {tentativa})')
-            resposta = s.get(url, stream=True, timeout=TIMEOUT_DOWNLOAD)
+            logger.info(f'Tentando baixar arquivo: {url} (tentativa {tentativa}/{RETRIES_DOWNLOAD})')
+            
+            # ✅ NOVO: Usar timeout mais curto para detectar SSL rapidamente
+            # Se der timeout, retry mais rápido que 120s
+            resposta = s.get(url, stream=True, timeout=30)
+            
             if resposta.status_code == 200:
                 with open(caminho_destino, 'wb') as f:
                     for chunk in resposta.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                logger.info(f"Arquivo salvo em: {caminho_destino}")
+                        if chunk:
+                            f.write(chunk)
+                logger.info(f"✅ Arquivo salvo em: {caminho_destino}")
                 return True
             else:
-                logger.error(f'Erro ao baixar arquivo: {resposta.status_code}')
+                logger.error(f'❌ Erro ao baixar arquivo: Status {resposta.status_code}')
+                
+        except (requests.exceptions.SSLError, requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout) as e:
+            # SSL, Connection ou Timeout - pode ser problema transitório
+            logger.error(f'❌ Erro de conexão ao baixar arquivo: {type(e).__name__}')
+            logger.debug(f'   Detalhes: {str(e)[:100]}...')
+            
+            if tentativa < RETRIES_DOWNLOAD:
+                # Para SSL/timeout, usar delay curto (30s) para server recuperar
+                delay_adaptativo = 30
+                logger.warning(
+                    f'⏳ Erro transitório detectado. Aguardando {delay_adaptativo}s '
+                    f'antes de tentar novamente... (tentativa {tentativa}/{RETRIES_DOWNLOAD})'
+                )
+                time.sleep(delay_adaptativo)
+            else:
+                logger.error(f'❌ FALHA FINAL: SSL/Connection error após {RETRIES_DOWNLOAD} tentativas')
+                
         except Exception as e:
-            logger.error(f'Erro ao baixar arquivo: {e}')
-        time.sleep(2)
+            # Outro erro genérico
+            logger.error(f'❌ Erro inesperado ao baixar arquivo: {type(e).__name__}: {e}')
+            
+            if tentativa < RETRIES_DOWNLOAD:
+                logger.warning(f'⏳ Aguardando {DOWNLOAD_RETRY_DELAY}s antes de tentar novamente...')
+                time.sleep(DOWNLOAD_RETRY_DELAY)
+            else:
+                logger.error(f'❌ FALHA FINAL: Erro inesperado após {RETRIES_DOWNLOAD} tentativas')
+    
     send_notification(f'Falha ao baixar arquivo após {RETRIES_DOWNLOAD} tentativas: {url}')
     return False
 
 def inserir_texto(driver, xpath, texto, referencia_map=None):
     elemento = esperar_elemento(driver, xpath, referencia_map)
     if elemento:
-        salvar_screenshot_elemento(driver, elemento, referencia_map)
         elemento.click()
         elemento.clear()
         elemento.send_keys(texto)
 
-def realizar_download_atividades(driver, button_xpath):
-    logger.info("Realizando download de atividades...")
-    # Limpa arquivos antigos semelhantes antes de iniciar um novo download
-    limpar_arquivos_antigos_downloads()
-    clicar_elemento(driver, button_xpath, 'atividades.export_atividades_button')
+def realizar_download_atividades(driver, button_xpath, tipo_export='atividades'):
+    logger.info(f"Realizando download de {tipo_export}...")
+    # NÃO limpar aqui - limpeza agora acontece UMA VEZ no início de executar_rotina()
+    
+    # Usar tipo_export para logging apropriado
+    ref_name = f'atividades.export_{tipo_export}_button'
+    clicar_elemento(driver, button_xpath, ref_name)
+    
+    # Esperar e processar o modal de confirmação
     esperar_elemento(driver, XPATHS['atividades']['input_code_field'], 'atividades.input_code_field')
     codigo_elemento = esperar_elemento(driver, XPATHS['atividades']['code_field'], 'atividades.code_field')
     codigo_texto = codigo_elemento.text
     match = re.search(r"(\d+)", codigo_texto)
     if match:
-        numero_atividades = int(match.group(1))
+        numero_items = int(match.group(1))
     else:
-        raise ValueError(f"Não foi possível extrair o número de atividades do texto: {codigo_texto}")
-    inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_atividades, 'atividades.input_code_field')
+        raise ValueError(f"Não foi possível extrair o número de {tipo_export} do texto: {codigo_texto}")
+    inserir_texto(driver, XPATHS['atividades']['input_code_field'], numero_items, 'atividades.input_code_field')
     clicar_elemento(driver, XPATHS['atividades']['confirm_button'], 'atividades.confirm_button')
-    elemento_download = esperar_download_pronto(driver, XPATHS['atividades']['download_link'], 'atividades.download_link')
+    
+    # ✅ NOVO: Aguardar que o arquivo seja processado (h5 "Arquivo disponível")
+    # Timeout: 300 segundos (5 minutos) para processar arquivo
+    aguardar_arquivo_disponivel(driver, timeout=300)
+    
+    # Agora sim, buscar o link de download
+    elemento_download = esperar_download_pronto(driver, XPATHS['atividades']['download_link'], 'atividades.download_link', timeout=60)
     url_download = elemento_download.get_attribute('href')
-    nome_arquivo = elemento_download.text.strip() or 'Exportacao Atividades.xlsx'
-    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-    caminho_destino = os.path.join(user_download_dir, nome_arquivo)
+    
+    # Nome do arquivo baseado no tipo
+    nomes_padrao = {
+        'status': 'Exportacao Status.xlsx',
+        'atividades': 'Exportacao Atividades.xlsx'
+    }
+    nome_arquivo = elemento_download.text.strip() or nomes_padrao.get(tipo_export, 'Exportacao.xlsx')
+    caminho_destino = os.path.join(DOWNLOADS_DIR, nome_arquivo)
+    
+    # ✅ Realizar o download com retries
     baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
     clicar_elemento(driver, XPATHS['atividades']['close_button'], 'atividades.close_button')
     fechar_modal(driver)
-    logger.info("Atividades baixadas com sucesso.")
+    logger.info(f"✅ {tipo_export.capitalize()} baixado com sucesso.")
 
-    # Após baixar, processar o arquivo e enviar para a API NocoDB
-    try:
-        # Determinar qual tabela usar baseado no nome do arquivo
-        is_status = 'status' in nome_arquivo.lower()
-        table_url_env = 'URL_TABELA_ATIVIDADES_STATUS' if is_status else 'URL_TABELA_ATIVIDADES'
-        table_url = os.getenv(table_url_env)
-        table_name = 'atividades_status' if is_status else 'atividades'
-        
-        if not table_url:
-            logger.warning(f"Variável {table_url_env} não configurada no .env. Pulando envio para {table_name}.")
-            return
-        
-        records = parse_export_producao(caminho_destino)
-        if records:
-            inicio = time.time()
-            stats = post_records_to_nocodb(records, table_url=table_url, table_name=table_name)
-            duracao = time.time() - inicio
-            registrar_resumo_envio(table_name, caminho_destino, stats, duracao)
-    except Exception as e:
-        logger.error(f"Erro ao processar/enviar {nome_arquivo}: {e}")
+    # NOTA: Parse e envio para SQL Server foi removido desta função
+    # Se precisar enviar, execute: python tests/test_parse_atividades.py <arquivo>
+    # Seguido de: python tests/test_post_atividades.py --dry-run
 
 def realizar_download_producao(driver):
     logger.info("Realizando download de produção...")
-    # Limpa arquivos antigos semelhantes antes de iniciar um novo download
-    limpar_arquivos_antigos_downloads()
-    esperar_elemento(driver, XPATHS['producao']['download_link'], 'producao.download_link', 300)
+    # NÃO limpar aqui - limpeza agora acontece UMA VEZ no início de executar_rotina()
+    
+    # ✅ NOVO: Aguardar que o arquivo seja processado (h5 "Arquivo disponível")
+    # Timeout: 300 segundos (5 minutos) para processar arquivo
+    aguardar_arquivo_disponivel(driver, timeout=300)
+    
     elemento_download = esperar_download_pronto(driver, XPATHS['producao']['download_link'], 'producao.download_link')
     url_download = elemento_download.get_attribute('href')
     nome_arquivo = elemento_download.text.strip() or 'ExportacaoProducao.xlsx'
-    user_download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-    caminho_destino = os.path.join(user_download_dir, nome_arquivo)
+    caminho_destino = os.path.join(DOWNLOADS_DIR, nome_arquivo)
     baixar_arquivo_com_cookies(driver, url_download, caminho_destino)
     clicar_elemento(driver, XPATHS['producao']['close_button'], 'producao.close_button')
     logger.info("Produção baixado com sucesso.")
 
-    # Após baixar, processar o arquivo e enviar para a API NocoDB
-    try:
-        records = parse_export_producao(caminho_destino)
-        if records:
-            inicio = time.time()
-            stats = post_records_to_nocodb(records)
-            duracao = time.time() - inicio
-            registrar_resumo_envio('producao', caminho_destino, stats, duracao)
-    except Exception as e:
-        logger.error(f"Erro ao processar/enviar ExportacaoProducao.xlsx: {e}")
+    # NOTA: Parse e envio para SQL Server foi removido desta função
+    # Se precisar enviar, execute: python tests/test_parse_atividades.py <arquivo>
+    # Seguido de: python tests/test_post_atividades.py --dry-run
 
 def fechar_modal(driver):
     # print("Fechando modal...")
@@ -397,9 +757,8 @@ def fechar_modal(driver):
         print("Nenhum modal aberto.")
 
 
-# Utilitário: limpeza robusta da pasta de Downloads antes de iniciar cada download
 def limpar_arquivos_antigos_downloads(palavras=None, padroes_regex=None, extensoes=(".xlsx",)):
-    """Remove arquivos antigos na pasta Downloads que combinem com palavras-chave ou padrões.
+    """Remove arquivos antigos na pasta DOWNLOADS_DIR que combinem com palavras-chave ou padrões.
 
     - palavras: lista de palavras-chave para buscar no nome (normalizadas: sem acento, minúsculas)
     - padroes_regex: lista de padrões regex a testar no nome do arquivo
@@ -436,7 +795,7 @@ def limpar_arquivos_antigos_downloads(palavras=None, padroes_regex=None, extenso
         except Exception:
             pass
 
-    downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+    downloads = DOWNLOADS_DIR
     removidos = 0
     try:
         for nome in os.listdir(downloads):
@@ -456,20 +815,20 @@ def limpar_arquivos_antigos_downloads(palavras=None, padroes_regex=None, extenso
                 try:
                     os.remove(caminho)
                     removidos += 1
-                    logger.info(f"Arquivo antigo removido da Downloads: {nome}")
+                    logger.info(f"Arquivo antigo removido: {nome}")
                 except PermissionError as e:
-                    logger.warning(f"⚠️ Não foi possível remover (em uso): {nome} - {e}")
+                    logger.warning(f"Nao foi possivel remover (em uso): {nome} - {e}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Erro ao remover arquivo antigo: {nome} - {e}")
+                    logger.warning(f"Erro ao remover arquivo antigo: {nome} - {e}")
     except FileNotFoundError:
         os.makedirs(downloads, exist_ok=True)
     except Exception as e:
-        logger.warning(f"⚠️ Erro ao varrer Downloads: {e}")
+        logger.warning(f"Erro ao varrer diretorio de downloads: {e}")
 
     if removidos:
-        logger.info(f"Limpeza de Downloads concluída: {removidos} arquivo(s) removido(s)")
+        logger.info(f"Limpeza de downloads concluida: {removidos} arquivo(s) removido(s)")
     else:
-        logger.info("Limpeza de Downloads: nenhum arquivo alvo encontrado")
+        logger.info("Limpeza de downloads: nenhum arquivo alvo encontrado")
     return removidos
 
 
@@ -515,9 +874,10 @@ def parse_export_producao(file_path):
     import pandas as pd
     import unicodedata
 
-    nocodb_map_file = 'nocodb_map.json'
+    # Procura nocodb_map.json sempre em \bases\
+    nocodb_map_file = os.path.join(os.path.dirname(__file__), 'bases', 'nocodb_map.json')
     if not os.path.exists(nocodb_map_file):
-        raise FileNotFoundError(f"Arquivo de mapeamento não encontrado: {nocodb_map_file}")
+        raise FileNotFoundError(f"Arquivo nocodb_map.json não encontrado em: {nocodb_map_file}")
 
     with open(nocodb_map_file, 'r', encoding='utf-8') as f:
         mapping = json.load(f)
@@ -592,7 +952,7 @@ def parse_export_producao(file_path):
         return str(val)
 
     records = []
-    for _, row in df.iterrows():
+    for line_num, (_, row) in enumerate(df.iterrows(), start=2):  # start=2 porque linha 1 é header
         rec = {}
         tags_extra = []
         for col, val in row.items():
@@ -619,6 +979,10 @@ def parse_export_producao(file_path):
             rec['TAGS'] = ' | '.join(parts) if parts else ""
         else:
             rec['TAGS'] = ' | '.join([t for t in tags_extra if t]) if tags_extra else ""
+
+        # Adicionar número da linha (interno, não será enviado ao banco)
+        rec['_line_number'] = line_num
+        rec['_file_name'] = os.path.basename(file_path)
 
         records.append(rec)
 
@@ -772,48 +1136,136 @@ def post_records_to_nocodb(records, table_url=None, table_name='producao'):
 # --- Fim: funções para processamento do ExportacaoProducao.xlsx e envio ---
 
 def exportAtividadesStatus(driver):
+    """Exporta relatório de Status de Atividades com retry automático (3 tentativas, com delay configurável)."""
     logger.info("Exportando atividades<>status...")
-    esperar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
-    clicar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
     
-    data_atual = datetime.now() # Obtém a data atual
-    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
-    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
+    max_tentativas = 3
+    delay_segundos = DOWNLOAD_RETRY_DELAY  # ✅ Usa delay configurável do .env (default: 120s)
     
-    selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial, 'atividades.date_picker')
-    clicar_elemento(driver, XPATHS['atividades']['search_button'], 'atividades.search_button')
-    realizar_download_atividades(driver, XPATHS['atividades']['export_status_button'])
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            esperar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
+            clicar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
+            
+            data_atual = datetime.now()
+            data_90_dias_atras = data_atual - timedelta(days=90)
+            data_inicial = data_90_dias_atras.strftime("%d/%m/%Y")
+            
+            selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial, 'atividades.date_picker')
+            clicar_elemento(driver, XPATHS['atividades']['search_button'], 'atividades.search_button')
+            realizar_download_atividades(driver, XPATHS['atividades']['export_status_button'], 'status')
+            fechar_modal(driver)
+            
+            logger.info("✅ Status de Atividades baixado com sucesso!")
+            return  # Sucesso, sair da função
+            
+        except Exception as e:
+            if tentativa < max_tentativas:
+                logger.warning(
+                    f"⚠️ Erro ao baixar Status (tentativa {tentativa}/{max_tentativas}): {type(e).__name__}\n"
+                    f"   Aguardando {delay_segundos}s antes de tentar novamente..."
+                )
+                time.sleep(delay_segundos)
+            else:
+                logger.error(
+                    f"❌ FALHA FINAL: Não consegui baixar Status após {max_tentativas} tentativas.\n"
+                    f"   Erro: {e}"
+                )
+                raise
 
 def exportAtividades(driver):
+    """Exporta relatório de Atividades com retry automático (3 tentativas, 1 min delay)."""
     logger.info("Exportando atividades...")
-    esperar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
-    clicar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
     
-    data_atual = datetime.now() # Obtém a data atual
-    data_90_dias_atras = data_atual - timedelta(days=90) # Subtrai 90 dias da data atual
-    data_inicial = data_90_dias_atras.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
+    max_tentativas = 3
+    delay_segundos = DOWNLOAD_RETRY_DELAY  # ✅ Usa delay configurável do .env (default: 120s)
     
-    selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial, 'atividades.date_picker')
-    clicar_elemento(driver, XPATHS['atividades']['search_button'], 'atividades.search_button')
-    realizar_download_atividades(driver, XPATHS['atividades']['export_atividades_button'])
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            # Garantir que o painel está aberto (reabrir se necessário)
+            esperar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
+            clicar_elemento(driver, XPATHS['atividades']['panel'], 'atividades.panel')
+            time.sleep(1)  # Pequeno delay para painel abrir
+            
+            # Aguardar que o grid de dados apareça
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, XPATHS['atividades']['search_button']))
+            )
+            
+            data_atual = datetime.now()
+            data_90_dias_atras = data_atual - timedelta(days=90)
+            data_inicial = data_90_dias_atras.strftime("%d/%m/%Y")
+            
+            selecionar_data(driver, XPATHS['atividades']['date_picker'], data_inicial, 'atividades.date_picker')
+            clicar_elemento(driver, XPATHS['atividades']['search_button'], 'atividades.search_button')
+            time.sleep(2)  # Aguardar grid carregar com dados
+            
+            # Aguardar que o botão de export esteja visível
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, XPATHS['atividades']['export_atividades_button']))
+            )
+            
+            realizar_download_atividades(driver, XPATHS['atividades']['export_atividades_button'], 'atividades')
+            fechar_modal(driver)
+            
+            logger.info("✅ Atividades baixado com sucesso!")
+            return  # Sucesso, sair da função
+            
+        except Exception as e:
+            if tentativa < max_tentativas:
+                logger.warning(
+                    f"⚠️ Erro ao baixar Atividades (tentativa {tentativa}/{max_tentativas}): {type(e).__name__}\n"
+                    f"   Aguardando {delay_segundos}s antes de tentar novamente..."
+                )
+                time.sleep(delay_segundos)
+            else:
+                logger.error(
+                    f"❌ FALHA FINAL: Não consegui baixar Atividades após {max_tentativas} tentativas.\n"
+                    f"   Erro: {e}"
+                )
+                raise
 
 def exportProducao(driver):
+    """Exporta relatório de Produção com retry automático (3 tentativas, 1 min delay)."""
     logger.info("Exportando produção...")
-    esperar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
-    clicar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
+    
+    max_tentativas = 3
+    delay_segundos = DOWNLOAD_RETRY_DELAY  # ✅ Usa delay configurável do .env (default: 120s)
+    
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            esperar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
+            clicar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
 
-    data_atual = datetime.now() # Obtém a data atual
-    data_90_dias_atras = data_atual - timedelta(days=92) # Subtrai 90 dias da data atual
-    data_inicial_ajustada = data_90_dias_atras.replace(day=1) # Define o dia como 1
-    data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
-    texto = "Painel de Produção Vivo"
+            data_atual = datetime.now()
+            data_90_dias_atras = data_atual - timedelta(days=92)
+            data_inicial_ajustada = data_90_dias_atras.replace(day=1)
+            data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y")
+            texto = "Painel de Produção Vivo"
 
-    selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial, 'producao.date_picker')
-    selecionar_texto(driver, XPATHS['producao']['combo_box'], texto, 'producao.combo_box')
-    clicar_elemento(driver, XPATHS['producao']['radio_button'], 'producao.radio_button')
-    clicar_elemento(driver, XPATHS['producao']['search_button'], 'producao.search_button')
-    realizar_download_producao(driver)
-    fechar_modal(driver)
+            selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial, 'producao.date_picker')
+            selecionar_texto(driver, XPATHS['producao']['combo_box'], texto, 'producao.combo_box')
+            clicar_elemento(driver, XPATHS['producao']['radio_button'], 'producao.radio_button')
+            clicar_elemento(driver, XPATHS['producao']['search_button'], 'producao.search_button')
+            realizar_download_producao(driver)
+            fechar_modal(driver)
+            
+            logger.info("✅ Produção baixado com sucesso!")
+            return  # Sucesso, sair da função
+            
+        except Exception as e:
+            if tentativa < max_tentativas:
+                logger.warning(
+                    f"⚠️ Erro ao baixar Produção (tentativa {tentativa}/{max_tentativas}): {type(e).__name__}\n"
+                    f"   Aguardando {delay_segundos}s antes de tentar novamente..."
+                )
+                time.sleep(delay_segundos)
+            else:
+                logger.error(
+                    f"❌ FALHA FINAL: Não consegui baixar Produção após {max_tentativas} tentativas.\n"
+                    f"   Erro: {e}"
+                )
+                raise
 
 def login(driver):
     acessar_pagina(driver, url)
@@ -908,6 +1360,99 @@ def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     
     logger.info(f"Operação concluída: {arquivos_movidos} arquivo(s) movido(s), {arquivos_ignorados} arquivo(s) ignorado(s)\n")
 
+def processar_arquivos_baixados():
+    """Processa arquivos baixados: parse e envio ao banco de dados.
+    
+    Executa APÓS todos os downloads estarem completos.
+    """
+    logger.info("\n" + "=" * 70)
+    logger.info("📤 FASE 2: Processando e enviando arquivos para o banco...")
+    logger.info("=" * 70)
+    
+    if not os.path.exists(DOWNLOADS_DIR):
+        logger.warning(f"Diretório de downloads não existe: {DOWNLOADS_DIR}")
+        return
+    
+    # Mapear arquivos Excel para suas configurações de processamento
+    arquivos_para_processar = [
+        {
+            'nome': 'Exportacao Status.xlsx',
+            'tabela': 'atividades_status',
+            'descricao': 'Status de Atividades'
+        },
+        {
+            'nome': 'Exportacao Atividades.xlsx',
+            'tabela': 'atividades',
+            'descricao': 'Atividades'
+        },
+        {
+            'nome': 'ExportacaoProducao.xlsx',
+            'tabela': 'producao',
+            'descricao': 'Produção'
+        }
+    ]
+    
+    processados_sucesso = 0
+    processados_erro = 0
+    
+    for arquivo_info in arquivos_para_processar:
+        nome_arquivo = arquivo_info['nome']
+        tabela_nome = arquivo_info['tabela']
+        descricao = arquivo_info['descricao']
+        
+        caminho_arquivo = os.path.join(DOWNLOADS_DIR, nome_arquivo)
+        
+        # Verificar se arquivo existe
+        if not os.path.exists(caminho_arquivo):
+            logger.warning(f"⏭️  Arquivo não encontrado (pulando): {nome_arquivo}")
+            continue
+        
+        try:
+            logger.info(f"\n[{descricao}] Iniciando processamento...")
+            tamanho_kb = os.path.getsize(caminho_arquivo) / 1024
+            logger.info(f"[{descricao}] Arquivo: {nome_arquivo} ({tamanho_kb:.1f} KB)")
+            
+            # Parse do arquivo
+            logger.info(f"[{descricao}] Fazendo parse do arquivo...")
+            records = parse_export_producao(caminho_arquivo)
+            
+            if not records:
+                logger.warning(f"[{descricao}] Nenhum registro encontrado no arquivo")
+                processados_erro += 1
+                continue
+            
+            logger.info(f"[{descricao}] Parse concluído: {len(records)} registros")
+            
+            # Envio ao banco de dados
+            logger.info(f"[{descricao}] Enviando para SQL Server...")
+            inicio = time.time()
+            stats = post_records_to_mssql(records, table_name=tabela_nome, file_name=nome_arquivo)
+            duracao = time.time() - inicio
+            
+            # Registrar resumo
+            registrar_resumo_envio(tabela_nome, caminho_arquivo, stats, duracao)
+            
+            logger.info(f"[{descricao}] ✅ Processamento concluído com sucesso!")
+            processados_sucesso += 1
+            
+        except Exception as e:
+            logger.error(f"[{descricao}] ❌ Erro ao processar: {e}")
+            logger.debug(f"[{descricao}] Detalhes do erro:", exc_info=True)
+            processados_erro += 1
+    
+    # Resumo final
+    logger.info("\n" + "=" * 70)
+    logger.info(f"📊 RESUMO DE PROCESSAMENTO")
+    logger.info(f"   ✅ Sucesso: {processados_sucesso}")
+    logger.info(f"   ❌ Erros: {processados_erro}")
+    logger.info("=" * 70 + "\n")
+    
+    return {
+        'sucesso': processados_sucesso,
+        'erro': processados_erro,
+        'total': processados_sucesso + processados_erro
+    }
+
 def executar_rotina():
     etapas = []
     try:
@@ -928,46 +1473,85 @@ def executar_rotina():
         # Limpeza robusta da pasta Downloads antes de qualquer novo download
         removidos = limpar_arquivos_antigos_downloads()
         logger.info(f"Limpeza inicial de Downloads: {removidos} arquivo(s) removidos")
+        
+        # ========== FASE 1: DOWNLOADS ==========
+        logger.info("\n" + "=" * 70)
+        logger.info("📥 FASE 1: Baixando todos os arquivos...")
+        logger.info("=" * 70)
+        
         etapas.append("Driver iniciado")
         driver = iniciar_driver()
         etapas.append("Login realizado")
         login(driver)
+        
         # Abrir sidebar
         abrir_sidebar(driver)
         etapas.append("Sidebar aberto")
+        
         # Exportação Atividades Status
         data_atual_dt = datetime.now()
         data_90_dias_atras = data_atual_dt - timedelta(days=90)
         data_inicial_atividades = data_90_dias_atras.strftime("%d/%m/%Y")
         etapas.append(f"Exportação Atividades Status (data inicial: {data_inicial_atividades})")
+        logger.info("\n[1/3] Baixando Status de Atividades...")
         exportAtividadesStatus(driver)
         time.sleep(10)
+        logger.info("✅ Status de Atividades baixado!")
+        
         # Abrir sidebar
         abrir_sidebar(driver)
+        
         # Exportação Atividades
         etapas.append(f"Exportação Atividades (data inicial: {data_inicial_atividades})")
+        logger.info("\n[2/3] Baixando Atividades...")
         exportAtividades(driver)
         time.sleep(10)
+        logger.info("✅ Atividades baixado!")
+        
         # Abrir sidebar
         abrir_sidebar(driver)
+        
         # Exportação Produção
         data_90_dias_atras_producao = data_atual_dt - timedelta(days=92)
         data_inicial_ajustada = data_90_dias_atras_producao.replace(day=1)
         data_inicial_producao = data_inicial_ajustada.strftime("%d/%m/%Y")
         etapas.append(f"Exportação Produção (data inicial: {data_inicial_producao})")
+        logger.info("\n[3/3] Baixando Produção...")
         exportProducao(driver)
+        logger.info("✅ Produção baixado!")
+        
+        # Fechar driver após todos os downloads
         driver.quit()
         etapas.append("Driver finalizado")
-        time.sleep(10)
-        # Conforme solicitado, NÃO mover arquivos baixados para outro diretório.
-        # Os arquivos permanecerão na pasta de Downloads do usuário.
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        logger.info(f"Arquivos baixados permanecerão em: {downloads_dir}")
-        etapas.append("Arquivos processados")
+        time.sleep(5)
+        
+        logger.info("\n" + "=" * 70)
+        logger.info("✅ FASE 1 CONCLUÍDA: Todos os arquivos foram baixados!")
+        logger.info("=" * 70)
+        
+        logger.info(f"Arquivos em: {DOWNLOADS_DIR}")
+        if os.path.exists(DOWNLOADS_DIR):
+            arquivos = [f for f in os.listdir(DOWNLOADS_DIR) if f.endswith('.xlsx')]
+            logger.info(f"Total de arquivos: {len(arquivos)}")
+            for arq in sorted(arquivos):
+                tamanho = os.path.getsize(os.path.join(DOWNLOADS_DIR, arq)) / 1024
+                logger.info(f"   📄 {arq} ({tamanho:.1f} KB)")
+        
+        # ========== FASE 2: PROCESSAMENTO E ENVIO ==========
+        etapas.append("Iniciando processamento de arquivos")
+        resultado_processamento = processar_arquivos_baixados()
+        
+        if resultado_processamento['sucesso'] > 0:
+            logger.info(f"\n✅ {resultado_processamento['sucesso']} arquivo(s) processado(s) com sucesso!")
+        if resultado_processamento['erro'] > 0:
+            logger.warning(f"⚠️ {resultado_processamento['erro']} arquivo(s) com erro durante processamento")
+        
+        etapas.append("Arquivos processados e enviados ao banco")
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        logger.info(f"Finalizado em {data_atual}")
+        logger.info(f"\nFinalizado em {data_atual}")
         etapas.append(f"Finalizado em {data_atual}")
-        logger.info("⏳ Agendando a execução a cada 30 minutos...")
+        logger.info("Agendando a execução a cada 30 minutos...")
+        
     except Exception as e:
         etapas.append(f"Erro: {e}")
         logger.error(f"Erro: {e}")
