@@ -114,6 +114,7 @@
 
 | Arquivo | Propósito | Quando consultar |
 |---------|----------|-----------------|
+| **`TRATAMENTO_COLUNAS_DUPLICADAS.md`** | **NOVO (Fase 15.1): Colunas com nomes iguais no Excel** | **Excel Status com 2x USUÁRIO** |
 | **`ESTRATEGIA_RETRY_DOWNLOADS.md`** | **Novo: Retry automático para downloads (Fase 8)** | **Downloads falhando temporariamente** |
 | `TRATAMENTO_DUPLICATAS.md` | Guia completo de duplicatas (Fase 6) | Há duplicatas no banco |
 | `.env.example` | Template de variáveis de ambiente | Setup inicial |
@@ -124,6 +125,9 @@
 
 | Arquivo | Propósito | Quando consultar |
 |---------|----------|-----------------|
+| `PROGRESSO_GERAL.md` | **NOVO: Status de todas as 16 fases** | **Visão executiva do projeto** |
+| `FASE14_6_RESUMO_FINAL.md` | **NOVO: Completude da Fase 14.6** | **Entender sincronização de colunas** |
+| `FASE14_6_CHECKLIST_FINAL.md` | **NOVO: Checklist visual Fase 14.6** | **Validar tudo está completo** |
 | `LISTA_MUDANCAS_RECENTES.md` | Resumo das 6 fases de dev | Entender evolução do projeto |
 | `ATUALIZACOES_DOCUMENTACAO.md` | O que foi atualizado nos docs | Validar que tem tudo |
 | `RESUMO_VISUAL_UPDATES.md` | Status visual de updates | Visão rápida |
@@ -232,6 +236,11 @@ grep "DUPLICATA DETECTADA" logs/robo_download.log
 - 🐛 Troubleshooting: `docs/TROUBLESHOOTING.md` → "Violation of PRIMARY KEY"
 - 💡 Código: `.github/copilot-instructions.md` → "Tratamento de Erros"
 
+### Tópico: Colunas Duplicadas (NOVO - Fase 15.1)
+- 📖 Guia Completo: **`TRATAMENTO_COLUNAS_DUPLICADAS.md` (NOVO)**
+- 🏗️ Automação: `gerar_sql_map_automatico.py` → Detecção e renomeação
+- 💡 Resultado: 2x USUÁRIO → USUARIO + USUARIO_1 no banco
+
 ### Tópico: Instalação
 - 📚 Guia Completo: `docs/INSTALACAO_E_DEPLOY.md` (Fases 1-6)
 - ✅ Checklist: `ATUALIZACOES_DOCUMENTACAO.md`
@@ -246,6 +255,13 @@ grep "DUPLICATA DETECTADA" logs/robo_download.log
 - 🏗️ Arquitetura: `docs/ARQUITETURA_E_API.md` → "Tratamento de Erros"
 - 💡 Padrão: `.github/copilot-instructions.md` → "Seção 4"
 - 📝 Histórico: `LISTA_MUDANCAS_RECENTES.md` → "Mudança 1"
+
+### Tópico: Mapeamento de Colunas Excel (NOVO - Fase 14.6)
+- 📖 Referência: `MAPEAMENTO_COLUNAS_EXCEL.md`
+- 📋 Resumo: `FASE14_6_RESUMO_FINAL.md`
+- ✅ Checklist: `FASE14_6_CHECKLIST_FINAL.md`
+- 🏗️ Detalhes: `FASE14_6_SINCRONIZACAO_NOMES_REAIS.md`
+- 💡 Código: `models/db_operations.py` linhas 29-95
 
 ### Tópico: \bases\ Folder
 - ✅ Setup: `docs/INSTALACAO_E_DEPLOY.md` → "Fase 3.4"
@@ -336,7 +352,7 @@ Qualquer pergunta que tiver, esse índice vai apontar para a resposta certa.
 
 ---
 
-**Última atualização:** 28 de outubro de 2025  
-**Versão:** 1.0  
+**Última atualização:** 29 de outubro de 2025 (Fase 15.1 - Tratamento de Colunas Duplicadas)  
+**Versão:** 1.2  
 **Manutenido por:** ViFigueiredo  
 **Status:** ✅ COMPLETO

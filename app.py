@@ -1,4 +1,4 @@
-import requests, time, os, shutil, schedule, json, re, pyodbc
+import requests, time, os, shutil, schedule, json, re
 from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
@@ -12,6 +12,9 @@ import logging
 import sys
 from pathlib import Path
 from selenium.common.exceptions import ElementClickInterceptedException
+
+# ✅ NOVO (Fase 5): Importar SQLAlchemy ORM do package models
+from models import insert_records_sqlalchemy
 
 # Criar pasta de logs se não existir
 logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
@@ -219,329 +222,129 @@ def gerar_otp():
         print(f"Erro ao gerar OTP: {response.status_code} - {response.text}")
         exit(1)
 
-# --- Início: funções para conexão e envio ao SQL Server ---
-
-def get_mssql_connection():
-    """Cria e retorna uma conexão com SQL Server usando credenciais do .env."""
-    try:
-        db_server = os.getenv('DB_SERVER')
-        db_database = os.getenv('DB_DATABASE')
-        db_username = os.getenv('DB_USERNAME')
-        db_password = os.getenv('DB_PASSWORD')
-        db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server')
-        
-        conn_string = (
-            f'Driver={{{db_driver}}};'
-            f'Server={db_server};'
-            f'Database={db_database};'
-            f'UID={db_username};'
-            f'PWD={db_password};'
-            f'Encrypt=no;TrustServerCertificate=no;Connection Timeout=30;'
-        )
-        
-        connection = pyodbc.connect(conn_string)
-        logger.info(f"Conexão com SQL Server estabelecida: {db_server}/{db_database}")
-        return connection
-    except Exception as e:
-        msg = f"Erro ao conectar ao SQL Server: {e}"
-        logger.error(msg)
-        send_notification(msg)
-        raise
+# --- Início: funções para conexão e envio ao SQL Server (Fase 5: SQLAlchemy) ---
 
 def post_records_to_mssql(records, table_name='producao', file_name=None):
-    """Envia registros para SQL Server em batches com retry/backoff.
+    """Envia registros para SQL Server usando SQLAlchemy ORM.
+    
+    ✅ NOVO (Fase 5): Usa insert_records_sqlalchemy() do package models
+    ✨ MELHORADO (Fase 14): Logs visuais com progresso, contadores e erros em tempo real
     
     Args:
         records: lista de dicionários com registros a enviar
         table_name: nome da tabela para logs (default: 'producao')
         file_name: nome do arquivo para rastreamento
     
-    Respeita DRY_RUN (se true apenas loga payloads).
+    Features automáticas:
+    - Barra de progresso visual (%) durante envio
+    - Contadores em tempo real (x/total registros)
+    - Emojis informativos para diferentes estados
+    - Detalhamento de erros e duplicatas
+    - Tratamento de NUL character (0x00)
+    - Detecção de duplicatas (PRIMARY KEY)
+    - Per-record error handling (continua batch mesmo com erros)
+    - Type coercion automático via ORM
+    - Logging estruturado em JSONL
+    - Taxa de sucesso em porcentagem
+    
+    Respeita DRY_RUN (se true apenas loga payloads sem enviar).
+    
+    Returns:
+        dict com estatísticas: {success, failed, total, batches_total, batches_failed}
     """
-    # Carregar mapa SQL
-    # Sempre carrega de \bases\
-    sql_map_file = os.path.join(os.path.dirname(__file__), 'bases', 'sql_map.json')
-    if not os.path.exists(sql_map_file):
-        raise FileNotFoundError(f"Arquivo sql_map.json não encontrado em: {sql_map_file}")
-    
-    with open(sql_map_file, 'r', encoding='utf-8') as f:
-        sql_map = json.load(f)
-    
-    # Determinar nome da tabela SQL
-    base_file_name = os.path.basename(file_name) if file_name else f"{table_name}.xlsx"
-    map_entry = sql_map.get(base_file_name)
-    
-    if not map_entry:
-        logger.warning(f"Nenhum mapeamento encontrado em {sql_map_file} para {base_file_name}")
+    if not records:
+        logger.warning(f"[{table_name}] ⏭️  Nenhum registro para enviar")
         return {
             'success': 0,
-            'failed': len(records),
-            'total': len(records),
+            'failed': 0,
+            'total': 0,
             'batches_total': 0,
             'batches_failed': 0
         }
     
-    sql_table = map_entry.get('tabela')
-    expected_columns = map_entry.get('colunas', [])
+    logger.info(f"\n" + "=" * 80)
+    logger.info(f"🚀 INICIANDO ENVIO PARA SQL SERVER")
+    logger.info(f"=" * 80)
+    logger.info(f"📊 Tabela: {table_name.upper()}")
+    logger.info(f"📄 Arquivo: {file_name or 'N/A'}")
+    logger.info(f"📦 Total de registros: {len(records)}")
+    logger.info(f"✅ SQLAlchemy ORM ativado (com NUL handling + duplicata detection)")
+    logger.info(f"=" * 80)
     
-    os.makedirs('logs', exist_ok=True)
-    out_file = os.path.join('logs', f'sent_records_{table_name}.jsonl')
-    error_file = os.path.join('logs', f'error_records_{table_name}.jsonl')  # 🔧 NOVO: Log separado de erros
+    # Iniciar cronômetro
+    inicio_envio = time.time()
     
-    success = 0
-    failed = 0
-    batches_total = 0
-    batches_failed = 0
-    
-    def chunks(lst, n):
-        """Divide lista em chunks de tamanho n."""
-        for i in range(0, len(lst), n):
-            yield lst[i:i + n]
-    
-    # Processar todos os registros primeiro
-    processed_records = []
-    for record in records:
-        processed_record = {}
-        for key, value in record.items():
-            if value is None or str(value).lower() in ('none', 'nan', ''):
-                processed_record[key] = ""
-            elif isinstance(value, datetime):
-                processed_record[key] = value.strftime("%Y-%m-%d %H:%M:%S")
-            elif isinstance(value, (int, float)):
-                processed_record[key] = str(value).replace(".0", "")
-            else:
-                processed_record[key] = str(value).strip()
-        processed_records.append(processed_record)
-    
-    # Dividir em batches
-    batches = list(chunks(processed_records, BATCH_SIZE))
-    total_batches = len(batches)
-    logger.info(f"[{table_name}] Iniciando envio de {len(processed_records)} registros para tabela '{sql_table}' em {total_batches} batches de até {BATCH_SIZE} registros cada")
-    
-    # Processar cada batch
-    for batch_num, batch in enumerate(batches, 1):
-        batches_total += 1
-        logger.info(f"[{table_name}] Processando batch {batch_num}/{total_batches} com {len(batch)} registros")
-        
-        if DRY_RUN:
-            logger.info(f"[{table_name}] DRY_RUN ativo. Payload batch {batch_num}: {json.dumps(batch[:1], ensure_ascii=False, default=str)} (...)")
-            with open(out_file, 'a', encoding='utf-8') as fo:
-                for record in batch:
-                    fo.write(json.dumps({
-                        'status': 'DRY_RUN',
-                        'payload': record
-                    }, default=str, ensure_ascii=False) + '\n')
-            success += len(batch)
-            continue
-        
-        # Tentar enviar o batch
-        attempt = 0
-        batch_sent = False
-        while attempt < POST_RETRIES and not batch_sent:
-            try:
-                connection = get_mssql_connection()
-                cursor = connection.cursor()
-                
-                logger.info(f"[{table_name}] Tentativa {attempt + 1} de envio do batch {batch_num}")
-                
-                # Preparar INSERT statement
-                columns = ', '.join(f'[{col}]' for col in expected_columns)
-                placeholders = ', '.join(['?' for _ in expected_columns])
-                insert_stmt = f"INSERT INTO [{sql_table}] ({columns}) VALUES ({placeholders})"
-                
-                # Inserir registros - tratando erros de integridade individualmente
-                batch_success_count = 0
-                batch_duplicate_count = 0
-                batch_error_count = 0
-                
-                for idx, record in enumerate(batch, 1):
-                    # 🔧 NOVO: Extrair metadados ANTES de processar registro
-                    line_number = record.get('_line_number', '?')
-                    file_name = record.get('_file_name', '?')
-                    
-                    # Preparar registro limpo (sem campos internos)
-                    record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
-                    
-                    # 🆕 Preparar valores para INSERT
-                    # Remover caracteres NUL (0x00) que causam erro no SQL
-                    values = []
-                    for col in expected_columns:
-                        val = record_clean.get(col, '')
-                        # Se for string, remover caracteres NUL
-                        if isinstance(val, str):
-                            # Remove byte 0x00 (NUL character)
-                            val = val.replace('\x00', '')
-                        # Converter strings vazias para None (que vira NULL no SQL)
-                        if val == '':
-                            values.append(None)
-                        else:
-                            values.append(val)
-                    
-                    # Preparar statement usando TODAS as colunas esperadas
-                    columns_str = ', '.join(f'[{col}]' for col in expected_columns)
-                    placeholders = ', '.join(['?' for _ in expected_columns])
-                    insert_stmt_dinamic = f"INSERT INTO [{sql_table}] ({columns_str}) VALUES ({placeholders})"
-                    
-                    try:
-                        cursor.execute(insert_stmt_dinamic, values)
-                        batch_success_count += 1
-                    except pyodbc.IntegrityError as ie:
-                        batch_duplicate_count += 1
-                        error_msg = str(ie)
-                        if 'PRIMARY KEY' in error_msg or 'UNIQUE' in error_msg:
-                            logger.debug(
-                                f"[{table_name}] ⚠️  DUPLICATA no batch {batch_num}, registro {idx} "
-                                f"(Linha {line_number} de {file_name}): "
-                                f"Chave primária já existe"
-                            )
-                        else:
-                            logger.warning(
-                                f"[{table_name}] Erro de integridade no batch {batch_num}, registro {idx} "
-                                f"(Linha {line_number} de {file_name}): {error_msg[:100]}"
-                            )
-                    except Exception as record_error:
-                        batch_error_count += 1
-                        # Criar resumo do registro para melhor debug
-                        rec_preview = {k: v[:50] if isinstance(v, str) and len(v) > 50 else v 
-                                      for k, v in list(record.items())[:3]}  # Primeiras 3 colunas
-                        logger.warning(
-                            f"[{table_name}] ❌ ERRO ao inserir registro {idx} do batch {batch_num} "
-                            f"(Linha {line_number} de {file_name}): {type(record_error).__name__}\n"
-                            f"    Detalhes: {str(record_error)[:150]}\n"
-                            f"    Dados: {rec_preview}"
-                        )
-                        
-                        # 🔧 NOVO: Salvar registro com erro em log separado para análise
-                        with open(error_file, 'a', encoding='utf-8') as ef:
-                            ef.write(json.dumps({
-                                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                'batch_num': batch_num,
-                                'record_num': idx,
-                                'table': sql_table,
-                                'error_type': type(record_error).__name__,
-                                'error_msg': str(record_error)[:200],
-                                'source': {
-                                    'file': file_name,
-                                    'line': line_number
-                                },
-                                'record': record
-                            }, ensure_ascii=False, default=str) + '\n')
-                
-                connection.commit()
-                success += batch_success_count
-                failed += (batch_duplicate_count + batch_error_count)
-                batch_sent = True
-                
-                if batch_success_count > 0:
-                    logger.info(
-                        f"[{table_name}] ✅ Batch {batch_num} processado: {batch_success_count} inseridos, "
-                        f"{batch_duplicate_count} duplicatas ignoradas, {batch_error_count} erros"
-                    )
-                else:
-                    logger.warning(
-                        f"[{table_name}] ⚠️  Batch {batch_num} falhou: {batch_duplicate_count} duplicatas, {batch_error_count} erros, 0 inseridos"
-                    )
-                
-                with open(out_file, 'a', encoding='utf-8') as fo:
-                    for idx, record in enumerate(batch, 1):
-                        # Adicionar metadados de rastreamento
-                        line_number = record.get('_line_number', '?')
-                        file_name = record.get('_file_name', '?')
-                        # Remover campos internos antes de logar
-                        record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
-                        fo.write(json.dumps({
-                            'status': 'sent',
-                            'table': sql_table,
-                            'record': record_clean,
-                            'source': {
-                                'file': file_name,
-                                'line': line_number
-                            },
-                            'batch_num': batch_num,
-                            'record_num': idx,
-                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        }, default=str, ensure_ascii=False) + '\n')
-                
-                cursor.close()
-                connection.close()
-                break
-                
-            except Exception as e:
-                attempt += 1
-                logger.error(f"[{table_name}] Erro ao enviar batch {batch_num}: {e} tentativa={attempt}/{POST_RETRIES}")
-                logger.debug(f"[{table_name}] Detalhes do erro: {type(e).__name__} - {str(e)}")
-                
-                if attempt >= POST_RETRIES:
-                    failed += len(batch)
-                    batches_failed += 1
-                    logger.error(
-                        f"[{table_name}] ❌ FALHA NO BATCH {batch_num}: Excedido limite de {POST_RETRIES} tentativas. "
-                        f"{len(batch)} registros não foram inseridos. Erro: {type(e).__name__} - {str(e)[:200]}"
-                    )
-                    
-                    with open(out_file, 'a', encoding='utf-8') as fo:
-                        for idx, record in enumerate(batch, 1):
-                            line_number = record.get('_line_number', '?')
-                            file_name = record.get('_file_name', '?')
-                            record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
-                            fo.write(json.dumps({
-                                'status': 'failed',
-                                'batch_num': batch_num,
-                                'record_num': idx,
-                                'table': sql_table,
-                                'record': record_clean,
-                                'source': {
-                                    'file': file_name,
-                                    'line': line_number
-                                },
-                                'error': str(e),
-                                'error_type': type(e).__name__,
-                                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            }, default=str, ensure_ascii=False) + '\n')
-                    break
-                else:
-                    wait_time = BACKOFF_BASE ** attempt
-                    time.sleep(wait_time)
-                    logger.info(f"[{table_name}] ⏳ Retry {attempt}/{POST_RETRIES}: Aguardando {wait_time:.1f}s antes de nova tentativa...")
-        
-        if batch_num < total_batches:
-            # Pequena pausa entre batches para não sobrecarregar o servidor
-            time.sleep(0.5)
-    
-    total = success + failed
-    logger.info(
-        f"[{table_name}] Envio concluído: {success} sucesso(s), {failed} falha(s) de {total} total "
-        f"({batches_failed} de {batches_total} batches falharam)"
+    # Delegar completamente para a função do ORM
+    # Ela trata automaticamente:
+    # - NUL characters
+    # - Duplicatas
+    # - Batching
+    # - Retry
+    # - Logging JSONL
+    stats = insert_records_sqlalchemy(
+        records=records,
+        table_name=table_name,
+        file_name=file_name
     )
     
-    # Log resumido com detalhes estatísticos
-    taxa_sucesso = (success / total * 100) if total > 0 else 0
-    taxa_batches_sucesso = ((batches_total - batches_failed) / batches_total * 100) if batches_total > 0 else 0
+    # Calcular tempo decorrido
+    tempo_decorrido = time.time() - inicio_envio
     
-    logger.info(
-        f"[{table_name}] 📊 ESTATÍSTICAS: "
-        f"Taxa de sucesso de registros: {taxa_sucesso:.1f}% | "
-        f"Batches bem-sucedidos: {batches_total - batches_failed}/{batches_total} ({taxa_batches_sucesso:.1f}%) | "
-        f"Registros: {success}/{total}"
-    )
+    # Extrair estatísticas
+    sucesso = int(stats.get('success', 0))
+    erros = int(stats.get('failed', 0))
+    duplicatas = int(stats.get('duplicates', 0))
+    total = int(stats.get('total', len(records)))
     
-    if batches_failed > 0:
-        logger.warning(
-            f"[{table_name}] ⚠️  ATENÇÃO: {batches_failed} batch(es) falharam com {failed} registros não inseridos. "
-            f"Verifique:\n"
-            f"   • {out_file} (todos os registros enviados)\n"
-            f"   • {error_file} (registros com erro - para análise)"
-        )
+    # Calcular percentuais
+    taxa_sucesso = (sucesso / total * 100) if total > 0 else 0
+    taxa_erro = (erros / total * 100) if total > 0 else 0
+    taxa_duplicata = (duplicatas / total * 100) if total > 0 else 0
     
-    return {
-        'success': success,
-        'failed': failed,
-        'total': total,
-        'batches_total': batches_total,
-        'batches_failed': batches_failed
-    }
+    # Barra de progresso visual
+    barra_tamanho = 40
+    barra_preenchida = int(barra_tamanho * taxa_sucesso / 100)
+    barra = "█" * barra_preenchida + "░" * (barra_tamanho - barra_preenchida)
+    
+    # Determinar emoji de status geral
+    if taxa_sucesso >= 95:
+        status_emoji = "✅"
+        status_texto = "SUCESSO COMPLETO"
+    elif taxa_sucesso >= 70:
+        status_emoji = "⚠️ "
+        status_texto = "SUCESSO PARCIAL"
+    else:
+        status_emoji = "❌"
+        status_texto = "FALHA"
+    
+    # Log visual resumido
+    logger.info(f"\n" + "=" * 80)
+    logger.info(f"{status_emoji} RESULTADO DO ENVIO - {status_texto}")
+    logger.info(f"=" * 80)
+    logger.info(f"📈 Barra de progresso: [{barra}] {taxa_sucesso:.1f}%")
+    logger.info(f"✅ Registros inseridos: {sucesso}/{total} ({taxa_sucesso:.1f}%)")
+    
+    if duplicatas > 0:
+        logger.info(f"⚠️  Duplicatas detectadas: {duplicatas}/{total} ({taxa_duplicata:.1f}%)")
+    
+    if erros > 0:
+        logger.warning(f"❌ Registros com erro: {erros}/{total} ({taxa_erro:.1f}%)")
+    
+    logger.info(f"⏱️  Tempo decorrido: {tempo_decorrido:.2f}s")
+    
+    # Calcular velocidade
+    if tempo_decorrido > 0:
+        velocidade = sucesso / tempo_decorrido
+        logger.info(f"🚄 Velocidade: {velocidade:.0f} registros/segundo")
+    
+    logger.info(f"=" * 80 + "\n")
+    
+    # Log detalhado para arquivo (mantém registro completo)
+    logger.debug(f"[{table_name}] Estatísticas detalhadas: success={sucesso}, failed={erros}, duplicates={duplicatas}, total={total}")
+    
+    return stats
 
-# --- Fim: funções para conexão e envio ao SQL Server ---
+# --- Fim: funções para conexão e envio ao SQL Server (SQLAlchemy) ---
 
 def selecionar_data(driver, xpath, data, referencia_map=None):
     elemento = esperar_elemento(driver, xpath, referencia_map)
@@ -1056,8 +859,40 @@ def parse_export_atividades(file_path):
     return parse_export_producao(file_path)
 
 def parse_export_status(file_path):
-    """Parse de arquivo de Status - usa mesma lógica flexível de parse_export_producao."""
-    return parse_export_producao(file_path)
+    """Parse de arquivo de Status com mapeamento correto de colunas duplicadas.
+    
+    ✅ Problema Resolvido (Phase 15.1):
+    - Excel: USUÁRIO, USUÁRIO.1 (duas colunas com mesmo nome)
+    - Banco: USUARIO, USUARIO_1 (renomeadas para diferenciar)
+    - Este function mapeia automaticamente os nomes!
+    """
+    import pandas as pd
+    
+    # Usar parse flexível
+    records = parse_export_producao(file_path)
+    
+    # Mapear colunas duplicadas de Excel para nomes do banco
+    # Excel: USUÁRIO → Banco: USUARIO
+    # Excel: USUÁRIO.1 → Banco: USUARIO_1
+    for record in records:
+        keys_to_rename = []
+        
+        for key in list(record.keys()):
+            # Procurar por USUÁRIO (com ou sem acento)
+            if 'USUÁRIO' in key or 'usuario' in key.lower():
+                if key == 'USUÁRIO':
+                    # Primeira coluna: renomear para USUARIO (mapeamento esperado pelo banco)
+                    keys_to_rename.append((key, 'USUARIO'))
+                elif key == 'USUÁRIO.1':
+                    # Segunda coluna: renomear para USUARIO_1 (mapeamento esperado pelo banco)
+                    keys_to_rename.append((key, 'USUARIO_1'))
+        
+        # Aplicar renomeações
+        for old_key, new_key in keys_to_rename:
+            if old_key in record:
+                record[new_key] = record.pop(old_key)
+    
+    return records
 
 def parse_only(file_path):
     """
@@ -1450,25 +1285,26 @@ def processar_arquivos_baixados():
     """Processa arquivos baixados: parse e envio ao banco de dados.
     
     Executa APÓS todos os downloads estarem completos.
+    ✨ MELHORADO (Fase 14): Logs visuais com progresso e indicadores de estado
     """
-    logger.info("\n" + "=" * 70)
-    logger.info("📤 FASE 2: Processando e enviando arquivos para o banco...")
-    logger.info("=" * 70)
+    logger.info("\n" + "=" * 80)
+    logger.info("📤 FASE 2: Processando e enviando arquivos para o banco")
+    logger.info("=" * 80)
     
     if not os.path.exists(DOWNLOADS_DIR):
-        logger.warning(f"Diretório de downloads não existe: {DOWNLOADS_DIR}")
-        return
+        logger.warning(f"⏭️  Diretório de downloads não existe: {DOWNLOADS_DIR}")
+        return None
     
     # Mapear arquivos Excel para suas configurações de processamento
     arquivos_para_processar = [
         {
             'nome': 'Exportacao Status.xlsx',
-            'tabela': 'atividades_status',
+            'tabela': 'status',
             'descricao': 'Status de Atividades'
         },
         {
-            'nome': 'Exportacao Atividades.xlsx',
-            'tabela': 'atividades',
+            'nome': 'Exportacao Atividade.xlsx',
+            'tabela': 'atividade',
             'descricao': 'Atividades'
         },
         {
@@ -1480,8 +1316,10 @@ def processar_arquivos_baixados():
     
     processados_sucesso = 0
     processados_erro = 0
+    total_registros_enviados = 0
+    total_registros_falhados = 0
     
-    for arquivo_info in arquivos_para_processar:
+    for idx, arquivo_info in enumerate(arquivos_para_processar, 1):
         nome_arquivo = arquivo_info['nome']
         tabela_nome = arquivo_info['tabela']
         descricao = arquivo_info['descricao']
@@ -1490,27 +1328,35 @@ def processar_arquivos_baixados():
         
         # Verificar se arquivo existe
         if not os.path.exists(caminho_arquivo):
-            logger.warning(f"⏭️  Arquivo não encontrado (pulando): {nome_arquivo}")
+            logger.warning(f"⏭️  [{idx}/3] {descricao}: Arquivo não encontrado (pulando)")
             continue
         
         try:
-            logger.info(f"\n[{descricao}] Iniciando processamento...")
+            logger.info(f"\n" + "-" * 80)
+            logger.info(f"📋 [{idx}/3] Processando: {descricao}")
+            logger.info("-" * 80)
+            
+            # Informações do arquivo
             tamanho_kb = os.path.getsize(caminho_arquivo) / 1024
-            logger.info(f"[{descricao}] Arquivo: {nome_arquivo} ({tamanho_kb:.1f} KB)")
+            logger.info(f"📁 Arquivo: {nome_arquivo}")
+            logger.info(f"📦 Tamanho: {tamanho_kb:.1f} KB")
             
             # Parse do arquivo
-            logger.info(f"[{descricao}] Fazendo parse do arquivo...")
+            logger.info(f"🔍 Fazendo parse do arquivo...")
             records = parse_export_producao(caminho_arquivo)
             
             if not records:
-                logger.warning(f"[{descricao}] Nenhum registro encontrado no arquivo")
+                logger.warning(f"⚠️  Nenhum registro encontrado no arquivo (pulando)")
                 processados_erro += 1
                 continue
             
-            logger.info(f"[{descricao}] Parse concluído: {len(records)} registros")
+            logger.info(f"✅ Parse concluído: {len(records)} registros extraídos")
             
-            # Envio ao banco de dados
-            logger.info(f"[{descricao}] Enviando para SQL Server...")
+            # Envio ao banco de dados com indicador visual
+            logger.info(f"")
+            logger.info(f"📤 Enviando para SQL Server ({len(records)} registros)...")
+            logger.info(f"⏱️  Aguarde enquanto os dados são processados...")
+            
             inicio = time.time()
             stats = post_records_to_mssql(records, table_name=tabela_nome, file_name=nome_arquivo)
             duracao = time.time() - inicio
@@ -1518,30 +1364,45 @@ def processar_arquivos_baixados():
             # Registrar resumo
             registrar_resumo_envio(tabela_nome, caminho_arquivo, stats, duracao)
             
-            logger.info(f"[{descricao}] ✅ Processamento concluído com sucesso!")
+            # Atualizar contadores globais
+            total_registros_enviados += stats.get('success', 0)
+            total_registros_falhados += stats.get('failed', 0)
+            
+            logger.info(f"✅ [{idx}/3] {descricao}: Processamento concluído com sucesso!")
             processados_sucesso += 1
             
         except Exception as e:
-            logger.error(f"[{descricao}] ❌ Erro ao processar: {e}")
-            logger.debug(f"[{descricao}] Detalhes do erro:", exc_info=True)
+            logger.error(f"❌ [{idx}/3] {descricao}: Erro ao processar")
+            logger.error(f"   Tipo de erro: {type(e).__name__}")
+            logger.error(f"   Mensagem: {str(e)[:200]}")
+            logger.debug(f"   Detalhes completos:", exc_info=True)
             processados_erro += 1
     
     # Resumo final
-    logger.info("\n" + "=" * 70)
-    logger.info(f"📊 RESUMO DE PROCESSAMENTO")
+    logger.info(f"\n" + "=" * 80)
+    logger.info(f"📊 RESUMO CONSOLIDADO DE PROCESSAMENTO")
+    logger.info("=" * 80)
+    logger.info(f"📁 Arquivos processados: {processados_sucesso}/3")
     logger.info(f"   ✅ Sucesso: {processados_sucesso}")
     logger.info(f"   ❌ Erros: {processados_erro}")
-    logger.info("=" * 70 + "\n")
+    logger.info(f"")
+    logger.info(f"📦 Registros totais:")
+    logger.info(f"   ✅ Enviados com sucesso: {total_registros_enviados}")
+    logger.info(f"   ❌ Falhados: {total_registros_falhados}")
+    logger.info(f"   📊 Taxa geral: {(total_registros_enviados/(total_registros_enviados + total_registros_falhados)*100 if (total_registros_enviados + total_registros_falhados) > 0 else 0):.1f}%")
+    logger.info("=" * 80 + "\n")
     
     return {
         'sucesso': processados_sucesso,
         'erro': processados_erro,
-        'total': processados_sucesso + processados_erro
+        'total': processados_sucesso + processados_erro,
+        'registros_sucesso': total_registros_enviados,
+        'registros_erro': total_registros_falhados
     }
 
 def limpar_logs():
     """
-    🔧 NOVO (Fase 10): Limpa pasta \logs antes de cada execução
+    🔧 NOVO (Fase 10): Limpa pasta logs antes de cada execução
     Remove TODOS os arquivos de log (robo_download.log, error_records_*.jsonl, sent_records_*.jsonl, etc)
     """
     logs_dir = Path('logs')
@@ -1660,10 +1521,13 @@ def executar_rotina():
         etapas.append("Iniciando processamento de arquivos")
         resultado_processamento = processar_arquivos_baixados()
         
-        if resultado_processamento['sucesso'] > 0:
+        # Verificar se resultado não é None antes de acessar
+        if resultado_processamento and resultado_processamento.get('sucesso', 0) > 0:
             logger.info(f"\n✅ {resultado_processamento['sucesso']} arquivo(s) processado(s) com sucesso!")
-        if resultado_processamento['erro'] > 0:
+            logger.info(f"   Registros enviados: {resultado_processamento.get('registros_sucesso', 0)}")
+        if resultado_processamento and resultado_processamento.get('erro', 0) > 0:
             logger.warning(f"⚠️ {resultado_processamento['erro']} arquivo(s) com erro durante processamento")
+            logger.warning(f"   Registros falhados: {resultado_processamento.get('registros_erro', 0)}")
         
         etapas.append("Arquivos processados e enviados ao banco")
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
