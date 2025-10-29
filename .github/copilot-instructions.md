@@ -1,5 +1,35 @@
 # GitHub Copilot Instructions - Robô de Download Neo
 
+---
+
+## 🚨 INSTRUÇÃO CRÍTICA - LEI FUNDAMENTAL
+
+### ⚠️ REGRA ABSOLUTA: NÃO CRIAR DOCUMENTAÇÃO NA RAIZ DO PROJETO
+
+**LEIA E ENTENDA:**
+
+```
+❌ PROIBIDO:
+   Criar qualquer arquivo .md, .txt ou documentação na RAIZ do projeto
+   Exemplos ERRADOS:
+   • ANALISE_ERROS.md (na raiz)
+   • RESUMO.txt (na raiz)
+   • RELATORIO.md (na raiz)
+   • Qualquer novo .md fora de docs/
+
+✅ OBRIGATÓRIO:
+   Criar TODA documentação em: docs/ (subdiretório)
+   Exemplos CORRETOS:
+   • docs/ANALISE_ERROS.md
+   • docs/RESUMO.txt
+   • docs/RELATORIO.md
+   
+🔔 EXCEÇÃO ÚNICA:
+   .github/copilot-instructions.md (já está fora da raiz, mantém-se aqui)
+```
+
+---
+
 ## 📋 Contexto do Projeto
 
 Este é um sistema de automação web empresarial que realiza downloads automatizados de relatórios de um sistema corporativo e os processa para envio a APIs do NocoDB. O projeto utiliza Selenium para automação web, pandas para processamento de dados, e tem um sistema robusto de agendamento e retry.
@@ -266,8 +296,11 @@ python tests/test_post_atividades.py --dry-run --batch-size 10
 
 ## 📚 Rotina de Atualização de Documentação
 
-### Quando Modificar Código
-**IMPORTANTE:** Toda mudança no código `app.py` ou arquivos-chave **DEVE** ser documentada. Porém, **NÃO crie novo `.md`** - atualize os arquivos existentes!
+### ⚠️ REGRA CRÍTICA: Documentação EXCLUSIVAMENTE em `\docs`
+
+**NUNCA crie arquivos `.md`, `.txt` ou qualquer documentação na RAIZ do projeto!**
+
+Todos os documentos devem estar em: `docs/` (subdiretório)
 
 ### Mapeamento Código → Documentação
 
@@ -286,33 +319,34 @@ python tests/test_post_atividades.py --dry-run --batch-size 10
 Exemplo: Adicionou novo tipo de retry exponencial em app.py
 ```
 
-**2️⃣ Identifique qual `.md` documenta isso:**
+**2️⃣ Identifique qual arquivo `.md` documenta isso:**
 ```
-→ Padrão de código = copilot-instructions.md
-→ OU Arquitetura = ARQUITETURA_E_API.md
+IMPORTANTE: Procure em `docs/` APENAS
+→ Padrão de código = copilot-instructions.md (exceção, fora de docs/)
+→ OU Arquitetura = docs/ARQUITETURA_E_API.md
+→ OU Erros = docs/TROUBLESHOOTING.md
 ```
 
 **3️⃣ Procure a seção relevante NO ARQUIVO EXISTENTE:**
 ```
-NÃO crie novo .md chamado "NOVO_RETRY_EXPONENCIAL.md"
-↓
-Procure em ARQUITETURA_E_API.md a seção "Tratamento de Erros"
-ou "Envio de APIs" que fale sobre retry
+❌ NUNCA crie novo .md chamado "NOVO_RETRY_EXPONENCIAL.md" na raiz
+✅ Procure em docs/ARQUITETURA_E_API.md a seção "Tratamento de Erros"
+   ou "Envio de APIs" que fale sobre retry
 ```
 
 **4️⃣ Atualize a seção encontrada:**
 ```
-Use replace_string_in_file para atualizar a seção
+Use replace_string_in_file para atualizar a seção EM docs/
 Mantenha a estrutura original
 Adicione seus detalhes à seção existente
 ```
 
 **5️⃣ Se nenhuma seção existir:**
 ```
-EXCEÇÃO: Se não houver seção relevante em nenhum .md
-→ Crie uma NOVA SEÇÃO dentro do .md mais apropriado
+EXCEÇÃO: Se não houver seção relevante em nenhum arquivo
+→ Crie uma NOVA SEÇÃO dentro do arquivo .md apropriado EM docs/
 → NÃO crie um novo arquivo .md
-→ Exemplo: Se é novo erro, adicione em TROUBLESHOOTING.md
+→ Exemplo: Se é novo erro, adicione em docs/TROUBLESHOOTING.md
 ```
 
 ### Exemplos de Aplicação
@@ -343,19 +377,29 @@ Ação: Adicionar nova seção Fase 7 após Fase 6
 
 ### ⚠️ Regras de Ouro
 
-1. **NÃO criar arquivo `.md` novo** por mudança de código
-   - Exceção: Documentação completamente fora do escopo atual (muito rara)
+1. **NUNCA criar arquivo `.md` novo na RAIZ do projeto**
+   - Todo arquivo `.md`, `.txt`, ou documentação vai em `docs/`
+   - Exceção única: `.github/copilot-instructions.md` (já está fora da raiz)
+   - Violação: Criar `NOVO_RECURSO.md` na raiz = ❌ ERRADO
 
-2. **SEMPRE verificar docs existentes** antes de escrever
+2. **SEMPRE colocar documentação em `docs/` subdiretório**
+   - Novo erro? → `docs/TROUBLESHOOTING.md`
+   - Novo padrão? → `docs/ARQUITETURA_E_API.md`
+   - Nova fase? → `docs/INSTALACAO_E_DEPLOY.md`
+   - Novo índice? → `docs/INDICE_DOCUMENTACAO.md`
+
+3. **SEMPRE verificar `docs/` existentes** antes de escrever
    - Use `grep` ou leitura para encontrar seção relevante
-   - Se não achar, vá para seção "genérica" (ex: Troubleshooting)
+   - Se não achar, vá para seção "genérica" em arquivo apropriado
 
-3. **Manter estrutura original** do documento
+4. **Manter estrutura original** dos documentos
    - Não reorganize seções existentes
    - Não remova conteúdo obsoleto (marque como ⚠️ DEPRECATED se necessário)
+   - Adicione à seção existente, não crie nova seção desnecessária
 
-4. **Links internos** devem apontar para arquivo e seção corretos
-   - Exemplo: `[Ver em TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md)`
+5. **Links internos** devem apontar para arquivo e seção corretos
+   - Exemplo: `[Ver em docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md)`
+   - NÃO: `[Ver em TROUBLESHOOTING.md](../TROUBLESHOOTING.md)` (na raiz)
 
 5. **Data de atualização** no final do arquivo
    - Exemplo: `**Última atualização:** 28 de outubro de 2025`

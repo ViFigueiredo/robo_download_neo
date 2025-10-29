@@ -1,54 +1,69 @@
+"""
+🧪 TESTE: Parse de ExportacaoStatus.xlsx para JSON
+⚠️  IMPORTANTE: Este teste APENAS faz parse, sem inserção em banco
+"""
 import sys
 import os
 from pathlib import Path
+import json
+from datetime import datetime
 
-# Garantir que o diretório raiz do projeto esteja no sys.path quando o teste for executado
+# Garantir que o diretório raiz do projeto esteja no sys.path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app import parse_export_producao
+from app import parse_only
 
 def main():
-    # Permite passar o caminho do arquivo como argumento, caso contrário tenta na pasta Downloads
+    """
+    Parse de Exportacao Status.xlsx para JSON - SEM inserção em banco
+    """
+    # Localizar arquivo
     if len(sys.argv) > 1:
         file_path = sys.argv[1]
     else:
+        # Primeiro tentar em downloads/ (novo local)
+        project_downloads = os.path.join(ROOT, 'downloads', 'Exportacao Status.xlsx')
         user_download_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
-        file_path = os.path.join(user_download_dir, 'Exportacao Status.xlsx')
+        user_downloads = os.path.join(user_download_dir, 'Exportacao Status.xlsx')
+        
+        file_path = project_downloads if os.path.exists(project_downloads) else user_downloads
 
     if not os.path.exists(file_path):
-        print(f"Arquivo não encontrado: {file_path}")
+        print(f"❌ Arquivo não encontrado: {file_path}")
         print(f"Uso: python {sys.argv[0]} [caminho_para_ExportacaoStatus.xlsx]")
         sys.exit(2)
 
-    print(f"Parseando arquivo: {file_path}")
-    records = parse_export_producao(file_path)
-    print(f"Parsed {len(records)} records de ExportacaoStatus.xlsx")
+    print(f"📖 Parseando arquivo: {file_path}")
+    
+    # APENAS PARSE - SEM BANCO
+    records = parse_only(file_path)
+    print(f"✅ Parsed {len(records)} records de ExportacaoStatus.xlsx")
 
     # Garantir pasta de saída
     out_dir = os.path.join(ROOT, 'tests', 'json')
     os.makedirs(out_dir, exist_ok=True)
 
     # Gerar nome com timestamp
-    from datetime import datetime
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_file = os.path.join(out_dir, f'parsed_status_{ts}.json')
 
-    # Gravar todos os registros no JSON
-    import json
+    # Gravar TODOS os registros no JSON
     with open(out_file, 'w', encoding='utf-8') as fo:
         json.dump(records, fo, ensure_ascii=False, indent=2, default=str)
 
-    print(f"Saída gravada em: {out_file}")
+    print(f"💾 Saída gravada em: {out_file}")
+    print(f"📊 Total: {len(records)} registros salvos em JSON")
     
     # Mostrar primeiros 3 registros para inspeção
-    print("\n=== Primeiros 3 registros ===")
-    for i, r in enumerate(records[:3], 1):
-        print(f"\n--- Registro {i} ---")
-        for key, val in r.items():
-            if val:  # só mostrar campos preenchidos
-                print(f"  {key}: {val}")
+    if records:
+        print("\n=== Primeiros 3 registros ===")
+        for i, r in enumerate(records[:3], 1):
+            print(f"\n--- Registro {i} ---")
+            for key, val in r.items():
+                if val and key not in ['_line_number', '_file_name']:  # Ocultar metadados
+                    print(f"  {key}: {val}")
 
 if __name__ == '__main__':
     main()

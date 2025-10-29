@@ -286,6 +286,7 @@ def post_records_to_mssql(records, table_name='producao', file_name=None):
     
     os.makedirs('logs', exist_ok=True)
     out_file = os.path.join('logs', f'sent_records_{table_name}.jsonl')
+    error_file = os.path.join('logs', f'error_records_{table_name}.jsonl')  # 🔧 NOVO: Log separado de erros
     
     success = 0
     failed = 0
@@ -354,25 +355,44 @@ def post_records_to_mssql(records, table_name='producao', file_name=None):
                 batch_error_count = 0
                 
                 for idx, record in enumerate(batch, 1):
-                    # Extrair informações da linha para logging
-                    line_number = record.pop('_line_number', '?')
-                    file_name = record.pop('_file_name', '?')
+                    # 🔧 NOVO: Extrair metadados ANTES de processar registro
+                    line_number = record.get('_line_number', '?')
+                    file_name = record.get('_file_name', '?')
                     
-                    values = [record.get(col, '') for col in expected_columns]
+                    # Preparar registro limpo (sem campos internos)
+                    record_clean = {k: v for k, v in record.items() if not k.startswith('_')}
+                    
+                    # 🆕 Preparar valores para INSERT
+                    # Remover caracteres NUL (0x00) que causam erro no SQL
+                    values = []
+                    for col in expected_columns:
+                        val = record_clean.get(col, '')
+                        # Se for string, remover caracteres NUL
+                        if isinstance(val, str):
+                            # Remove byte 0x00 (NUL character)
+                            val = val.replace('\x00', '')
+                        # Converter strings vazias para None (que vira NULL no SQL)
+                        if val == '':
+                            values.append(None)
+                        else:
+                            values.append(val)
+                    
+                    # Preparar statement usando TODAS as colunas esperadas
+                    columns_str = ', '.join(f'[{col}]' for col in expected_columns)
+                    placeholders = ', '.join(['?' for _ in expected_columns])
+                    insert_stmt_dinamic = f"INSERT INTO [{sql_table}] ({columns_str}) VALUES ({placeholders})"
+                    
                     try:
-                        cursor.execute(insert_stmt, values)
+                        cursor.execute(insert_stmt_dinamic, values)
                         batch_success_count += 1
                     except pyodbc.IntegrityError as ie:
                         batch_duplicate_count += 1
                         error_msg = str(ie)
                         if 'PRIMARY KEY' in error_msg or 'UNIQUE' in error_msg:
-                            # Extrair valor da primeira coluna para identificação
-                            id_col = expected_columns[0] if expected_columns else 'N/A'
-                            id_val = record.get(id_col, 'N/A')
                             logger.debug(
                                 f"[{table_name}] ⚠️  DUPLICATA no batch {batch_num}, registro {idx} "
                                 f"(Linha {line_number} de {file_name}): "
-                                f"Chave primária '{id_col}={id_val}' já existe"
+                                f"Chave primária já existe"
                             )
                         else:
                             logger.warning(
@@ -390,6 +410,22 @@ def post_records_to_mssql(records, table_name='producao', file_name=None):
                             f"    Detalhes: {str(record_error)[:150]}\n"
                             f"    Dados: {rec_preview}"
                         )
+                        
+                        # 🔧 NOVO: Salvar registro com erro em log separado para análise
+                        with open(error_file, 'a', encoding='utf-8') as ef:
+                            ef.write(json.dumps({
+                                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'batch_num': batch_num,
+                                'record_num': idx,
+                                'table': sql_table,
+                                'error_type': type(record_error).__name__,
+                                'error_msg': str(record_error)[:200],
+                                'source': {
+                                    'file': file_name,
+                                    'line': line_number
+                                },
+                                'record': record
+                            }, ensure_ascii=False, default=str) + '\n')
                 
                 connection.commit()
                 success += batch_success_count
@@ -492,7 +528,9 @@ def post_records_to_mssql(records, table_name='producao', file_name=None):
     if batches_failed > 0:
         logger.warning(
             f"[{table_name}] ⚠️  ATENÇÃO: {batches_failed} batch(es) falharam com {failed} registros não inseridos. "
-            f"Verifique {out_file} para mais detalhes."
+            f"Verifique:\n"
+            f"   • {out_file} (todos os registros enviados)\n"
+            f"   • {error_file} (registros com erro - para análise)"
         )
     
     return {
@@ -864,28 +902,38 @@ def registrar_resumo_envio(table_name, file_path, stats, elapsed_seconds):
 
 # --- Início: funções para processamento do ExportacaoProducao.xlsx e envio ---
 def parse_export_producao(file_path):
-    """Parse flexível usando pandas: suporta diferentes planilhas mapeadas em `nocodb_map.json`.
+    """Parse flexível usando pandas e sql_map.json para mapeamento de colunas.
 
     Melhorias:
-    - Normaliza cabeçalhos (remove acentos, pontuação, lower) e faz matching tolerante com o mapeamento
+    - Usa APENAS sql_map.json (não precisa de nocodb_map.json)
+    - Normaliza cabeçalhos (remove acentos, pontuação, lower) e faz matching tolerante
     - Tenta converter strings que parecem datas para formato `%Y-%m-%d %H:%M:%S`
     - Mantém concatenação de colunas extras em `TAGS`
     """
     import pandas as pd
     import unicodedata
 
-    # Procura nocodb_map.json sempre em \bases\
-    nocodb_map_file = os.path.join(os.path.dirname(__file__), 'bases', 'nocodb_map.json')
-    if not os.path.exists(nocodb_map_file):
-        raise FileNotFoundError(f"Arquivo nocodb_map.json não encontrado em: {nocodb_map_file}")
+    # Procura sql_map.json sempre em \bases\
+    sql_map_file = os.path.join(os.path.dirname(__file__), 'bases', 'sql_map.json')
+    if not os.path.exists(sql_map_file):
+        raise FileNotFoundError(f"Arquivo sql_map.json não encontrado em: {sql_map_file}")
 
-    with open(nocodb_map_file, 'r', encoding='utf-8') as f:
-        mapping = json.load(f)
+    with open(sql_map_file, 'r', encoding='utf-8') as f:
+        sql_map = json.load(f)
 
     base_name = os.path.basename(file_path)
-    expected_headers = mapping.get(base_name, [])
+    
+    # Buscar entrada no sql_map para este arquivo
+    map_entry = sql_map.get(base_name)
+    if not map_entry:
+        logger.warning(f"Nenhum mapeamento encontrado em {sql_map_file} para {base_name}")
+        return []
+    
+    # expected_headers agora vem do sql_map (colunas do banco)
+    expected_headers = map_entry.get('colunas', [])
     if not expected_headers:
-        logger.warning(f"Nenhum mapeamento encontrado em {nocodb_map_file} para {base_name}")
+        logger.warning(f"Nenhuma coluna mapeada para {base_name}")
+        return []
 
     def normalize_header(s):
         if s is None:
@@ -906,7 +954,7 @@ def parse_export_producao(file_path):
         logger.error(f"Erro ao ler Excel {file_path}: {e}")
         return []
 
-    # Preparar mapeamento tolerante entre cabeçalhos esperados e colunas reais
+    # Preparar mapeamento tolerante entre cabeçalhos esperados (do banco) e colunas reais (do Excel)
     df.columns = [str(c).strip() if pd.notna(c) else '' for c in df.columns]
     real_columns = list(df.columns)
 
@@ -938,14 +986,28 @@ def parse_export_producao(file_path):
         # tentar converter strings que parecem datas
         if isinstance(val, str):
             val_str = val.strip()
+            
+            # 🆕 Remover caracteres NUL (0x00) que causam erro no SQL
+            val_str = val_str.replace('\x00', '')
+            
             if not val_str:
                 return ""
-            try:
-                parsed = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
-                if pd.notna(parsed):
-                    return parsed.to_pydatetime().strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
+            
+            # 🆕 Ignora FutureWarning do pandas para timezones desconhecidos (ex: "10:30 AS 12:30")
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                
+                try:
+                    # Se contém " AS " (range de horários), retornar como string (não tentar parse)
+                    if " AS " in val_str.upper():
+                        return val_str
+                    
+                    parsed = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
+                    if pd.notna(parsed):
+                        return parsed.to_pydatetime().strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
             return val_str
         if isinstance(val, (int, float)):
             return str(val).replace('.0', '')
@@ -988,6 +1050,30 @@ def parse_export_producao(file_path):
 
     logger.info(f"Parsed {len(records)} registros de {file_path} (pandas, flex) usando mapeamento {base_name}")
     return records
+
+def parse_export_atividades(file_path):
+    """Parse de arquivo de Atividades - usa mesma lógica flexível de parse_export_producao."""
+    return parse_export_producao(file_path)
+
+def parse_export_status(file_path):
+    """Parse de arquivo de Status - usa mesma lógica flexível de parse_export_producao."""
+    return parse_export_producao(file_path)
+
+def parse_only(file_path):
+    """
+    🆕 Parse PURO - sem logging, sem banco, sem side effects
+    
+    Use esta função em testes que precisam APENAS de parse para JSON
+    Não dispara nenhuma operação de banco de dados
+    
+    Args:
+        file_path: Caminho para arquivo Excel
+    
+    Returns:
+        Lista de dicts com registros parseados
+    """
+    # Apenas retorna o resultado do parse sem nenhum logging que poderia disparar side effects
+    return parse_export_producao(file_path)
 
 def post_records_to_nocodb(records, table_url=None, table_name='producao'):
     """Envia registros em batches com retry/backoff.
@@ -1453,12 +1539,45 @@ def processar_arquivos_baixados():
         'total': processados_sucesso + processados_erro
     }
 
+def limpar_logs():
+    """
+    🔧 NOVO (Fase 10): Limpa pasta \logs antes de cada execução
+    Remove TODOS os arquivos de log (robo_download.log, error_records_*.jsonl, sent_records_*.jsonl, etc)
+    """
+    logs_dir = Path('logs')
+    
+    if not logs_dir.exists():
+        return 0
+    
+    removidos = 0
+    
+    # Remove TODOS os arquivos na pasta logs
+    for arquivo in logs_dir.glob('*'):
+        if arquivo.is_file():
+            try:
+                arquivo.unlink()
+                logger.info(f"🗑️  Log removido: {arquivo.name}")
+                removidos += 1
+            except Exception as e:
+                logger.warning(f"⚠️  Não foi possível remover log: {arquivo.name} - {e}")
+    
+    if removidos > 0:
+        logger.info(f"✅ Limpeza de logs: {removidos} arquivo(s) removido(s)")
+    
+    return removidos
+
 def executar_rotina():
     etapas = []
     try:
         data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"Iniciando execução em {data_atual}")
         etapas.append(f"Execução iniciada em {data_atual}")
+        
+        # 🔧 NOVO (Fase 10): Limpar logs da execução anterior
+        logger.info("\n" + "=" * 70)
+        logger.info("🧹 LIMPEZA PRÉ-EXECUÇÃO")
+        logger.info("=" * 70)
+        limpar_logs()
         
         # Limpa a pasta de screenshots
         screenshots_dir = Path('element_screenshots')
