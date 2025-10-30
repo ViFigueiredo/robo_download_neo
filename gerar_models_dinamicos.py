@@ -29,16 +29,20 @@ FILE_TO_CLASS = {
         'class_name': 'ExportacaoProducao',
         'table_name': 'EXPORTACAO_PRODUCAO',
         'primary_key': 'NUMERO_ATIVIDADE',
+        'pk_type': 'simples',
     },
     'Exportacao Atividade.xlsx': {
         'class_name': 'ExportacaoAtividade',
         'table_name': 'EXPORTACAO_ATIVIDADE',
         'primary_key': 'ATIVIDADE',
+        'pk_type': 'simples',
     },
     'Exportacao Status.xlsx': {
         'class_name': 'ExportacaoStatus',
         'table_name': 'EXPORTACAO_STATUS',
-        'primary_key': 'NUMERO',
+        'primary_key': ['NUMERO', 'ENTROU', 'SAIU', 'USUARIO'],
+        'pk_type': 'composta',
+        'pk_constraint_name': 'pk_exportacao_status_composta',
     },
 }
 
@@ -73,8 +77,14 @@ def normalizar_nome_coluna(nome_excel):
     return nome.strip('_')
 
 
-def gerar_coluna_sqlalchemy(nome_excel, eh_pk=False):
-    """Gera definição de coluna SQLAlchemy"""
+def gerar_coluna_sqlalchemy(nome_excel, eh_pk=False, eh_pk_composta=False):
+    """Gera definição de coluna SQLAlchemy
+    
+    Args:
+        nome_excel: Nome da coluna no Excel
+        eh_pk: Ignorado (sem PKs)
+        eh_pk_composta: Ignorado (sem PKs)
+    """
     nome_py = normalizar_nome_coluna(nome_excel)
     
     # Tipo de coluna
@@ -83,26 +93,49 @@ def gerar_coluna_sqlalchemy(nome_excel, eh_pk=False):
     # Adicionar tamanho padrão para String
     tamanho = '(4000)'  # Tamanho generoso para NVARCHAR
     
-    # Primary key
-    if eh_pk:
-        tipo_def = f'Column({tipo}{tamanho}, primary_key=True)'
-    else:
-        tipo_def = f'Column({tipo}{tamanho})'
+    # Sem restrições de chave primária
+    tipo_def = f'Column({tipo}{tamanho})'
     
     return f"    {nome_py} = {tipo_def}"
+
+
+def gerar_id_coluna():
+    """Gera coluna de ID auto-incrementada (necessária para SQLAlchemy)"""
+    return f"    id = Column(Integer, primary_key=True, autoincrement=True)"
 
 
 def gerar_modelo(class_info, colunas_excel):
     """Gera código de um modelo SQLAlchemy"""
     class_name = class_info['class_name']
     table_name = class_info['table_name']
-    primary_key = normalizar_nome_coluna(class_info['primary_key'])
+    
+    # Detectar se é pk simples ou composta
+    pk_type = class_info.get('pk_type', 'simples')
+    primary_key = None
+    primary_key_list = []
+    
+    if pk_type == 'composta':
+        primary_key_list = [normalizar_nome_coluna(pk) for pk in class_info['primary_key']]
+    else:
+        primary_key = normalizar_nome_coluna(class_info['primary_key'])
     
     linhas = []
     linhas.append(f"\nclass {class_name}(Base):")
-    linhas.append(f'    """Modelo ORM para tabela {table_name}"""')
+    
+    # Adicionar docstring especial para Status
+    if class_name == 'ExportacaoStatus':
+        linhas.append(f'    """Modelo ORM para tabela {table_name}')
+        linhas.append(f'    ')
+        linhas.append(f'    Nota Importante: A tabela Status contém histórico de movimentações.')
+        linhas.append(f'    Sem restrições de chave primária ou índice único - permite inserir dados livremente.')
+        linhas.append(f'    """')
+    else:
+        linhas.append(f'    """Modelo ORM para tabela {table_name}"""')
+    
     linhas.append(f'    __tablename__ = \'{table_name}\'')
     linhas.append("")
+    linhas.append(gerar_id_coluna())
+    linhas.append(f"    # Campos de dados - SEM constrains, SEM PK, SEM índices únicos")
     
     # Gerar colunas
     for col_excel in colunas_excel:
@@ -111,15 +144,19 @@ def gerar_modelo(class_info, colunas_excel):
         
         # Normalizar nome para comparação
         col_normalizado = normalizar_nome_coluna(col_excel)
-        eh_pk = col_normalizado == primary_key
-        linhas.append(gerar_coluna_sqlalchemy(col_excel, eh_pk))
+        
+        # Sem PKs - todos os parâmetros ignorados
+        linhas.append(gerar_coluna_sqlalchemy(col_excel, False, False))
     
     # Adicionar DATA_IMPORTACAO
     linhas.append(f"    DATA_IMPORTACAO = Column(String, nullable=False, default='')")
     
     linhas.append("")
     linhas.append(f"    def __repr__(self):")
-    linhas.append(f'        return f"<{class_name}(...)>"')
+    if class_name == 'ExportacaoStatus':
+        linhas.append(f'        return f"<{class_name}(NUMERO={{self.NUMERO}}, ETAPA={{self.ETAPA}}, ENTROU={{self.ENTROU}})>"')
+    else:
+        linhas.append(f'        return f"<{class_name}(...)>"')
     
     return '\n'.join(linhas)
 

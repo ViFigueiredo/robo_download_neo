@@ -6,11 +6,11 @@ Modelos SQLAlchemy Gerados Dinamicamente
 Este arquivo é gerado automaticamente por gerar_models_dinamicos.py
 Não edite manualmente!
 
-Data de geração: 2025-10-29 18:16:12
+Data de geração: 2025-10-30 13:38:50
 Fonte: bases/sql_map.json
 """
 
-from sqlalchemy import create_engine, Column, String, DateTime
+from sqlalchemy import create_engine, Column, String, DateTime, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -63,9 +63,11 @@ class ExportacaoProducao(Base):
     """Modelo ORM para tabela EXPORTACAO_PRODUCAO"""
     __tablename__ = 'EXPORTACAO_PRODUCAO'
 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Campos de dados - SEM constrains, SEM PK, SEM índices únicos
     GRUPO = Column(String(4000))
     FILA = Column(String(4000))
-    NUMERO_ATIVIDADE = Column(String(4000), primary_key=True)
+    NUMERO_ATIVIDADE = Column(String(4000))
     PEDIDO_VINCULO = Column(String(4000))
     COTACAO = Column(String(4000))
     ATIVIDADE_ORIGEM = Column(String(4000))
@@ -123,7 +125,9 @@ class ExportacaoAtividade(Base):
     """Modelo ORM para tabela EXPORTACAO_ATIVIDADE"""
     __tablename__ = 'EXPORTACAO_ATIVIDADE'
 
-    ATIVIDADE = Column(String(4000), primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Campos de dados - SEM constrains, SEM PK, SEM índices únicos
+    ATIVIDADE = Column(String(4000))
     VINCULADO = Column(String(4000))
     LOGIN = Column(String(4000))
     TIPO = Column(String(4000))
@@ -152,10 +156,16 @@ class ExportacaoAtividade(Base):
         return f"<ExportacaoAtividade(...)>"
 
 class ExportacaoStatus(Base):
-    """Modelo ORM para tabela EXPORTACAO_STATUS"""
+    """Modelo ORM para tabela EXPORTACAO_STATUS
+    
+    Nota Importante: A tabela Status contém histórico de movimentações.
+    Sem restrições de chave primária ou índice único - permite inserir dados livremente.
+    """
     __tablename__ = 'EXPORTACAO_STATUS'
 
-    NUMERO = Column(String(4000), primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Campos de dados - SEM constrains, SEM PK, SEM índices únicos
+    NUMERO = Column(String(4000))
     ETAPA = Column(String(4000))
     PRAZO = Column(String(4000))
     SLA_HORAS = Column(String(4000))
@@ -169,7 +179,7 @@ class ExportacaoStatus(Base):
     DATA_IMPORTACAO = Column(String, nullable=False, default='')
 
     def __repr__(self):
-        return f"<ExportacaoStatus(...)>"
+        return f"<ExportacaoStatus(NUMERO={self.NUMERO}, ETAPA={self.ETAPA}, ENTROU={self.ENTROU})>"
 
 
 # Mapeamento dinâmico de nome de tabela → Classe
