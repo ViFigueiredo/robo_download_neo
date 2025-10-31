@@ -160,8 +160,7 @@ robo_download_neo/
 │
 └── bases/
     ├── map_relative.json (XPaths)
-    ├── nocodb_map.json (mapeamento colunas)
-    └── sql_map.json (estrutura tabelas)
+    └── sql_map.json (mapeamento colunas e tabelas)
 ```
 
 ---

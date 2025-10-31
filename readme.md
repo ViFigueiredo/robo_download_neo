@@ -154,8 +154,7 @@ robo_download_neo/
 │
 ├── bases/ ............................. Configuração JSON (obrigatório)
 │   ├── map_relative.json ............. XPaths Selenium
-│   ├── nocodb_map.json ............... Mapeamento Excel → SQL
-│   └── sql_map.json .................. Estrutura de tabelas
+│   └── sql_map.json .................. Mapeamento Excel → SQL (colunas e tabelas)
 │
 ├── downloads/ ......................... Arquivos Excel baixados
 ├── logs/ .............................. Logs estruturados (JSONL)

@@ -157,7 +157,7 @@ driver.get(SYS_URL)
 # Para cada arquivo:
 #   1. read_excel()
 #   2. normalize_headers()
-#   3. map_columns() usando nocodb_map.json
+#   3. map_columns() usando sql_map.json
 #   4. convert_data() (datas, tipos, etc)
 #   5. Resultado: List[Dict]
 ```
@@ -212,7 +212,7 @@ def parse_export_producao(file_path):
     
     # Mapear colunas
     mapped_records = [
-        mapear_registro(row, nocodb_map) 
+        mapear_registro(row, sql_map) 
         for _, row in df.iterrows()
     ]
     
@@ -344,13 +344,17 @@ def exportAtividadesStatus(driver):
 }
 ```
 
-### nocodb_map.json (Mapeamento Excel → SQL)
+### sql_map.json (Mapeamento Excel → SQL)
 ```json
 {
-  "numero": "NUMERO_ATIVIDADE",
-  "pedido": "PEDIDO_VINCULO",
-  "item": "ITEM",
-  ...
+  "ExportacaoProducao.xlsx": {
+    "colunas": [...],
+    "mapeamento_colunas": {
+      "NUMERO ATIVIDADE": "NUMERO_ATIVIDADE",
+      "PEDIDO VINCULO": "PEDIDO_VINCULO",
+      ...
+    }
+  }
 }
 ```
 

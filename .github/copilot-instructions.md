@@ -49,8 +49,7 @@ Este é um sistema de automação web empresarial que realiza downloads automati
 app.py              # Aplicação principal com toda a lógica
 bases/              # 📁 NOVO (Fase 4): Pasta obrigatória para JSONs
   ├── map_relative.json
-  ├── nocodb_map.json
-  ├── sql_map.json
+  └── sql_map.json
 downloads/          # 📁 Arquivos Excel baixados
 logs/               # 📁 Logs estruturados em JSONL
 tests/              # Suite completa de testes
@@ -86,7 +85,7 @@ def encontrar_elemento(driver, xpath, referencia_map=None, tempo=10):
 def parse_export_producao(file_path):
     # Usar pandas.read_excel()
     # Normalizar headers (acentos, pontuação)
-    # Mapeamento tolerante com nocodb_map.json
+    # Mapeamento tolerante com sql_map.json
     # Formato de data: "%Y-%m-%d %H:%M:%S"
 ```
 
@@ -166,6 +165,14 @@ DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD, DB_DRIVER
 # Configurações de envio
 BATCH_SIZE=25, POST_RETRIES=3, BACKOFF_BASE=1.5
 ```
+
+**NOVO (Fase 9): Carregamento Dinâmico de .env**
+- Entry point agora é `scripts/config_embutida.py`
+- Procura por `.env` em múltiplos locais (cwd, raiz)
+- Carrega credenciais em `os.environ` antes de `app.py`
+- `app.py` tolerante com ausência de `.env`
+- Seguro: credenciais não compiladas no `.exe`
+- **Ver:** `docs/INTEGRACAO_CONFIG_DINAMICA.md` para detalhes
 
 ### Tratamento de Erros
 - **ElementClickInterceptedException**: Tentar ESC para fechar overlays
@@ -268,7 +275,7 @@ python tests/test_post_atividades.py --dry-run --batch-size 10
 4. Salvar screenshots para documentação
 
 ### Ao Adicionar Novos Relatórios
-1. Criar entrada em `nocodb_map.json`
+1. Criar entrada em `sql_map.json` (não mais nocodb_map.json)
 2. Implementar função `parse_*` específica
 3. Adicionar URL da tabela no .env
 4. Criar testes correspondentes

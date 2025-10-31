@@ -40,17 +40,23 @@ def send_notification(msg):
     # Aqui você pode implementar envio por e-mail, Telegram, etc.
     logger.warning(f'NOTIFICAÇÃO: {msg}')
 
-# Carrega as variáveis do arquivo .env
-if not Path('.env').exists():
-    print('Arquivo .env não encontrado!')
-    sys.exit(1)
-load_dotenv('.env', override=True)
+# Carrega as variáveis do arquivo .env (se não foi carregado por config_embutida.py)
+env_file = Path('.env')
+if not env_file.exists():
+    env_file = Path(__file__).parent / '.env'
+
+if env_file.exists():
+    logger.info(f'Carregando .env de: {env_file}')
+    load_dotenv(env_file, override=True)
+else:
+    # Se não tem .env, tudo bem - config_embutida.py já carregou via os.environ
+    logger.warning('Arquivo .env não encontrado. Usando variáveis de ambiente existentes.')
 
 # Função para checar variáveis obrigatórias
 def checar_variaveis_obrigatorias(vars_list):
     faltando = [v for v in vars_list if not os.getenv(v)]
     if faltando:
-        print(f"Variáveis obrigatórias faltando no .env: {', '.join(faltando)}")
+        logger.error(f"Variáveis obrigatórias faltando: {', '.join(faltando)}")
         sys.exit(1)
 
 checar_variaveis_obrigatorias([
@@ -707,11 +713,12 @@ def registrar_resumo_envio(table_name, file_path, stats, elapsed_seconds):
 def parse_export_producao(file_path):
     """Parse flexível usando pandas e sql_map.json para mapeamento de colunas.
 
-    Melhorias:
-    - Usa APENAS sql_map.json (não precisa de nocodb_map.json)
+    Características:
+    - Usa APENAS sql_map.json para mapeamento
     - Normaliza cabeçalhos (remove acentos, pontuação, lower) e faz matching tolerante
     - Tenta converter strings que parecem datas para formato `%Y-%m-%d %H:%M:%S`
     - Mantém concatenação de colunas extras em `TAGS`
+    - Carregado obrigatoriamente de \\bases\\
     """
     import pandas as pd
     import unicodedata
