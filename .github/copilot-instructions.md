@@ -32,40 +32,141 @@
 
 ## 📋 Contexto do Projeto
 
-Este é um sistema de automação web empresarial que realiza downloads automatizados de relatórios de um sistema corporativo e os processa para envio a APIs do NocoDB. O projeto utiliza Selenium para automação web, pandas para processamento de dados, e tem um sistema robusto de agendamento e retry.
+**Sistema de automação web empresarial** que:
+- Realiza **login automatizado** com 2FA/OTP
+- **Baixa relatórios** em Excel de sistema corporativo (Vaadin)
+- **Processa dados** com normalização e mapeamento flexível
+- **Armazena em SQL Server** (3 tabelas, 60.815+ registros)
+- **Executa agendado** a cada 30 minutos entre 8h-22h
+
+**Stack:** Python 3.11 + Selenium + Pandas + SQLAlchemy + SQL Server 2022 + PyInstaller
 
 ## 🎯 Objetivos Principais
 
 - **Automação Web**: Login automatizado com 2FA/OTP e navegação por interface Vaadin
 - **Download de Relatórios**: Extração de dados de Produção, Atividades e Status de Atividades
 - **Processamento de Dados**: Parse flexível de arquivos Excel com mapeamento dinâmico
-- **Integração API**: Envio em batches para NocoDB com retry e logging detalhado
+- **Integração Database**: Envio em batches para SQL Server com retry e logging detalhado
 - **Execução Agendada**: Runs a cada 30 minutos entre 8h-22h
 
-## 🏗️ Arquitetura e Componentes
+## 🏗️ Arquitetura e Componentes (FINAL - Fase 14)
 
 ### Estrutura Principal
 ```
-app.py              # Aplicação principal com toda a lógica
-bases/              # 📁 NOVO (Fase 4): Pasta obrigatória para JSONs
-  ├── map_relative.json
-  └── sql_map.json
+🎯 ENTRY POINT: scripts/config_embutida.py
+   └─→ Carrega .env dinamicamente
+   └─→ Popula os.environ com 18 variáveis de configuração
+   └─→ Executa app.py
+
+app.py                      # Aplicação principal com toda a lógica
+bases/                      # 📁 JSONs de configuração
+  ├── map_relative.json     # XPaths relativos (Vaadin)
+  └── sql_map.json          # Mapeamento SQL (tabelas/colunas)
+
+📦 OUTPUTS (gerados automaticamente):
+  ├── dist/robo_neo.exe     # Executável único (34.1 MB)
+  ├── logs/                 # Logs estruturados em JSONL
+  ├── downloads/            # Arquivos Excel baixados
+  └── LEIA_ME.txt           # Instruções automáticas
+
 downloads/          # 📁 Arquivos Excel baixados
 logs/               # 📁 Logs estruturados em JSONL
-tests/              # Suite completa de testes
-.env                # Configurações sensíveis
+tests/              # 📁 Suite completa de testes
+scripts/            # 📁 Scripts utilitários
+  ├── config_embutida.py    # 🔑 Carregador dinâmico de .env
+  ├── robo_neo.spec         # 📦 Especificação PyInstaller
+  ├── empacotar_robo_neo.bat # 📦 Script build (Windows)
+  ├── validar_build.py      # ✅ Validador de build
+  └── gerar_xpath_relativo.py # 🔍 Gerador de XPaths
+
+.env                # 🔐 Configurações sensíveis (carregadas dinamicamente)
 ```
 
-**Importante (Fase 4):** Todos os JSONs **DEVEM** estar em `\bases\`. Sem fallback para raiz do projeto.
+**⚡ IMPORTANTE (Fase 8-14):** 
+- **Credenciais:** Carregadas **DINAMICAMENTE** do `.env` em runtime (NOT hardcoded)
+- **Configuração:** Entry point `scripts/config_embutida.py` antes de `app.py`
+- **Fallback:** Se `.env` ausente, tenta `os.environ` (para produção)
+- **JSONs:** APENAS `sql_map.json` + `map_relative.json` em `bases/`
 
 ### Tecnologias Core
-- **Selenium WebDriver** (Chrome/Edge)
-- **Pandas** para processamento Excel
-- **Requests** para APIs HTTP
-- **Schedule** para agendamento
-- **PyInstaller** para empacotamento
+- **Selenium WebDriver** (Chrome/Edge) - Automação web
+- **Pandas** - Processamento Excel
+- **PyODBC** - Conexão SQL Server (substituiu NocoDB)
+- **Schedule** - Agendamento de tasks
+- **PyInstaller** - Empacotamento executável
+- **SQLAlchemy** - ORM para SQL Server
 
-## 🔧 Padrões de Código
+## � Build e Empacotamento (FINAL - Fase 13)
+
+### Estrutura do Build Final
+```
+dist/
+├── robo_neo.exe          # ✅ Executável único (34.1 MB)
+├── logs/                 # Auto-criado em runtime
+├── downloads/            # Auto-criado em runtime
+└── LEIA_ME.txt           # Instruções auto-geradas
+```
+
+**⚡ IMPORTANTE (Fase 13):**
+- **Arquivo único:** `robo_neo.exe` está DIRETAMENTE em `dist/` (sem subpasta)
+- **Sem COLLECT():** `robo_neo.spec` modificado para usar APENAS `EXE()` block
+- **Tamanho:** 34.1 MB (otimizado)
+- **Autossuficiente:** Inclui todas as dependências Python compiladas
+
+### Como Construir o Executável
+
+**Pré-requisitos:**
+```bash
+pip install pyinstaller>=6.0
+pip install -r requirements.txt
+```
+
+**Comando de Build (Windows):**
+```batch
+# Na raiz do projeto:
+scripts\empacotar_robo_neo.bat
+
+# OU manualmente:
+pyinstaller "scripts\robo_neo.spec" --distpath dist --workpath build -y
+```
+
+**Validação do Build:**
+```bash
+# Verificar se foi construído corretamente:
+python scripts/validar_build.py
+
+# Executar o .exe:
+dist\robo_neo.exe
+```
+
+**⚠️ Possíveis Problemas:**
+
+| Erro | Causa | Solução |
+|------|-------|---------|
+| `ModuleNotFoundError` em runtime | Dependência não incluída no `.exe` | Adicionar em `robo_neo.spec` hidden_imports |
+| `[HY001]` (SQL Server timeout) | Conexão ODBC lenta | Aumentar `TIMEOUT_DOWNLOAD` no `.env` |
+| Arquivo não baixa | Overlay interceptando click | Testar com `HEADLESS=false` e screenshot |
+
+### Arquivo robo_neo.spec (FINAL)
+```python
+# CRÍTICO: SEM COLLECT() - apenas EXE()
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='robo_neo',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+)
+# ✅ Resultado: Single exe em dist/ (sem pasta robo_neo/)
+```
+
+## �🔧 Padrões de Código
 
 ### 1. Função de Elementos Web
 ```python
@@ -154,25 +255,46 @@ def exportAtividadesStatus(driver):
 ### Variáveis de Ambiente
 ```env
 # Sistema alvo
-SYS_URL, SYS_USERNAME, SYS_PASSWORD, SYS_SECRET_OTP
+SYS_URL=https://sistema.example.com
+SYS_USERNAME=seu_usuario
+SYS_PASSWORD=sua_senha
+SYS_SECRET_OTP=seu_secret_otp
 
 # Browser e timeouts
-BROWSER=chrome, HEADLESS=false, TIMEOUT_DOWNLOAD=60
+BROWSER=chrome                  # chrome ou edge
+HEADLESS=false                  # true para modo headless
+TIMEOUT_DOWNLOAD=60             # segundos para timeout de download
 
-# SQL Server
-DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD, DB_DRIVER
+# SQL Server (substituiu NocoDB)
+DB_SERVER=seu_servidor.database.windows.net
+DB_DATABASE=nome_database
+DB_USERNAME=usuario_sql
+DB_PASSWORD=senha_sql
+DB_DRIVER=ODBC Driver 17 for SQL Server
 
 # Configurações de envio
-BATCH_SIZE=25, POST_RETRIES=3, BACKOFF_BASE=1.5
+BATCH_SIZE=25                   # Registros por batch
+POST_RETRIES=3                  # Tentativas de retry
+BACKOFF_BASE=1.5                # Base para exponential backoff
 ```
 
-**NOVO (Fase 9): Carregamento Dinâmico de .env**
-- Entry point agora é `scripts/config_embutida.py`
-- Procura por `.env` em múltiplos locais (cwd, raiz)
-- Carrega credenciais em `os.environ` antes de `app.py`
-- `app.py` tolerante com ausência de `.env`
-- Seguro: credenciais não compiladas no `.exe`
-- **Ver:** `docs/INTEGRACAO_CONFIG_DINAMICA.md` para detalhes
+**🔑 NOVO (Fase 8-14): Carregamento Dinâmico de .env**
+- **Entry point:** `scripts/config_embutida.py` (executa antes de `app.py`)
+- **Busca automática:** Procura `.env` em múltiplos locais (cwd, raiz do projeto)
+- **Carregamento:** Popula `os.environ` com todas as 18 variáveis
+- **Fallback:** Se `.env` ausente, tenta `os.environ` (para produção com variáveis de sistema)
+- **Segurança:** Credenciais NÃO compiladas no `.exe` (carregadas em runtime)
+- **Verificação:** Validação de variáveis críticas com mensagens claras
+
+**Fluxo de Execução:**
+```
+1. User executa: robo_neo.exe (OU python app.py localmente)
+2. scripts/config_embutida.py executa PRIMEIRO
+3. Procura .env em: cwd → raiz do projeto
+4. Popula os.environ[VAR] = valor
+5. Executa app.py (agora com credenciais carregadas)
+6. app.py tolerante se .env ausente (usa os.environ como fallback)
+```
 
 ### Tratamento de Erros
 - **ElementClickInterceptedException**: Tentar ESC para fechar overlays
@@ -313,11 +435,15 @@ Todos os documentos devem estar em: `docs/` (subdiretório)
 
 | Aspecto do Código | Arquivo a Atualizar | Seção/Tópico |
 |------------------|-------------------|-------------|
-| **Arquitetura, fluxo, padrões** | `docs/ARQUITETURA_E_API.md` | Seção correspondente |
-| **Instalação, setup, deploy** | `docs/INSTALACAO_E_DEPLOY.md` | "Fase X" ou "Setup" |
-| **Erros, exceptions, bugs** | `docs/TROUBLESHOOTING.md` | "Problemas Comuns" |
-| **Navegação, índice de tópicos** | `docs/INDICE_DOCUMENTACAO.md` | Índice principal |
-| **Padrões de código, convenções** | `.github/copilot-instructions.md` | "Padrões de Código" |
+| **Quick start, início rápido** | `docs/00_COMECE_AQUI.md` | Main guide |
+| **Novo usuário, first steps** | `docs/1_INICIO.md` | Setup section |
+| **Referência rápida** | `docs/2_REFERENCIA.md` | Quick lookup |
+| **Detalhes arquitetura** | `docs/3_DETALHES.md` | Architecture section |
+| **Build e compilação** | `docs/BUILD_FINAL_CORRIGIDO.md` | Build process |
+| **Configuração dinâmica .env** | `docs/CONFIG_DINAMICA_DO_ENV.md` | Dynamic loading |
+| **Integração teste config** | `docs/INTEGRACAO_CONFIG_DINAMICA.md` | Testing section |
+| **Resumo de alterações** | `docs/RESUMO_ALTERACOES.md` | Current status |
+| **Padrões de código** | `.github/copilot-instructions.md` | "Padrões de Código" |
 
 ### Rotina Passo-a-Passo
 
@@ -369,17 +495,17 @@ Ação: Atualizar exemplo de código nessa seção
 **Exemplo 2: Novo erro de conexão SQL**
 ```
 Mudança: Novo erro `[HY001]` adicionado
-Arquivo: docs/TROUBLESHOOTING.md
-Seção: "Problemas Comuns"
+Arquivo: docs/3_DETALHES.md
+Seção: "Possíveis Problemas"
 Ação: Adicionar novo erro com solução nessa seção
 ```
 
 **Exemplo 3: Nova fase de desenvolvimento**
 ```
-Mudança: Fase 7 implementada com cache
-Arquivo: docs/INSTALACAO_E_DEPLOY.md
-Seção: "Fase 7: [Nome]"
-Ação: Adicionar nova seção Fase 7 após Fase 6
+Mudança: Fase 15 implementada com cache
+Arquivo: docs/RESUMO_ALTERACOES.md
+Seção: "Histórico de Fases"
+Ação: Adicionar nova Fase 15 após Fase 14
 ```
 
 ### ⚠️ Regras de Ouro
@@ -390,10 +516,9 @@ Ação: Adicionar nova seção Fase 7 após Fase 6
    - Violação: Criar `NOVO_RECURSO.md` na raiz = ❌ ERRADO
 
 2. **SEMPRE colocar documentação em `docs/` subdiretório**
-   - Novo erro? → `docs/TROUBLESHOOTING.md`
-   - Novo padrão? → `docs/ARQUITETURA_E_API.md`
-   - Nova fase? → `docs/INSTALACAO_E_DEPLOY.md`
-   - Novo índice? → `docs/INDICE_DOCUMENTACAO.md`
+   - Novo build process? → `docs/BUILD_FINAL_CORRIGIDO.md`
+   - Novo padrão de código? → `.github/copilot-instructions.md` ou `docs/3_DETALHES.md`
+   - Novo processo? → `docs/1_INICIO.md` ou `docs/2_REFERENCIA.md`
 
 3. **SEMPRE verificar `docs/` existentes** antes de escrever
    - Use `grep` ou leitura para encontrar seção relevante
@@ -404,12 +529,8 @@ Ação: Adicionar nova seção Fase 7 após Fase 6
    - Não remova conteúdo obsoleto (marque como ⚠️ DEPRECATED se necessário)
    - Adicione à seção existente, não crie nova seção desnecessária
 
-5. **Links internos** devem apontar para arquivo e seção corretos
-   - Exemplo: `[Ver em docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md)`
-   - NÃO: `[Ver em TROUBLESHOOTING.md](../TROUBLESHOOTING.md)` (na raiz)
-
 5. **Data de atualização** no final do arquivo
-   - Exemplo: `**Última atualização:** 28 de outubro de 2025`
+   - Exemplo: `**Última atualização:** 29 de outubro de 2025`
 
 ### Vantagens dessa Rotina
 

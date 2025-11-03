@@ -50,6 +50,11 @@ python app.py
 
 **Resultado esperado:** Login automático → Download 3 arquivos → Parse → Insert 60.815+ registros
 
+**⚡ Como funciona:**
+- O arquivo `.env` é carregado **dinamicamente** em runtime (não compilado no exe)
+- Entry point: `scripts/config_embutida.py` → carrega variáveis → executa `app.py`
+- Se `.env` não encontrado, tenta `os.environ` (para produção com variáveis de sistema)
+
 ---
 
 ## 📚 Documentação
