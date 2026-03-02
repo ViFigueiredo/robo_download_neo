@@ -174,6 +174,9 @@ def iniciar_driver():
     driver = None
     if browser == "chrome":
         from selenium.webdriver.chrome.options import Options as ChromeOptions
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from webdriver_manager.chrome import ChromeDriverManager
+
         options = ChromeOptions()
         # options.add_argument("--start-maximized")
         if headless:
@@ -187,7 +190,15 @@ def iniciar_driver():
             "safebrowsing.enabled": True
         }
         options.add_experimental_option("prefs", prefs)
-        driver = webdriver.Chrome(options=options)
+        
+        try:
+            logger.info("Tentando obter driver compatível via webdriver-manager...")
+            service = ChromeService(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+        except Exception as e:
+            logger.error(f"Erro ao instalar driver via manager: {e}")
+            logger.info("Tentando inicialização padrão...")
+            driver = webdriver.Chrome(options=options)
     elif browser == "edge":
         from selenium.webdriver.edge.options import Options as EdgeOptions
         options = EdgeOptions()
@@ -232,6 +243,29 @@ def encontrar_elemento(driver, xpath, referencia_map=None, tempo=10):
             if referencia_map:
                 msg += f" (referência map.json: {referencia_map})"
             logger.error(msg)
+            
+            # --- DEBUG INFO ---
+            try:
+                debug_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                # Criar diretório de logs se não existir
+                logs_dir = os.path.join("logs", "timeouts")
+                os.makedirs(logs_dir, exist_ok=True)
+                
+                save_path = os.path.abspath(os.path.join(logs_dir, f"debug_timeout_{debug_ts}"))
+                
+                # Salvar HTML
+                with open(f"{save_path}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logger.info(f"HTML debug salvo em: {save_path}.html")
+                
+                # Salvar Screenshot
+                driver.save_screenshot(f"{save_path}.png")
+                logger.info(f"Screenshot debug salvo em: {save_path}.png")
+            except Exception as e:
+                logger.warning(f"Falha ao salvar debug info: {e}")
+            # ------------------
+
             send_notification(msg)
             return None
         except NoSuchElementException:
@@ -559,8 +593,16 @@ def exportProducao(driver):
     clicar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
 
     data_atual = datetime.now() # Obtém a data atual
-    data_90_dias_atras = data_atual - timedelta(days=92) # Subtrai 90 dias da data atual
-    data_inicial_ajustada = data_90_dias_atras.replace(day=1) # Define o dia como 1
+    
+    # Lógica Bissexto: subtrair 92 dias se for bissexto (Fev=29), senão 91 (Fev=28)
+    ano_atual = data_atual.year
+    eh_bissexto = (ano_atual % 4 == 0 and ano_atual % 100 != 0) or (ano_atual % 400 == 0)
+    dias_delta = 92 if eh_bissexto else 91
+    logger.info(f"Ano: {ano_atual}, Bissexto: {eh_bissexto}, Subtraindo: {dias_delta} dias")
+
+    data_meses_atras = data_atual - timedelta(days=dias_delta) 
+    data_inicial_ajustada = data_meses_atras.replace(day=1) # Define o dia como 1
+    
     data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
     texto = "Painel de Produção Vivo"
 

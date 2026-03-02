@@ -3,3 +3,4 @@ Requests
 schedule
 selenium
 pyinstaller
+webdriver-manager
