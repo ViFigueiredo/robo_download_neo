@@ -592,21 +592,17 @@ def exportProducao(driver):
     esperar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
     clicar_elemento(driver, XPATHS['producao']['panel'], 'producao.panel')
 
-    data_atual = datetime.now() # Obtém a data atual
-    
-    # Lógica Bissexto: subtrair 92 dias se for bissexto (Fev=29), senão 91 (Fev=28)
-    ano_atual = data_atual.year
-    eh_bissexto = (ano_atual % 4 == 0 and ano_atual % 100 != 0) or (ano_atual % 400 == 0)
-    dias_delta = 92 if eh_bissexto else 91
-    logger.info(f"Ano: {ano_atual}, Bissexto: {eh_bissexto}, Subtraindo: {dias_delta} dias")
-
-    data_meses_atras = data_atual - timedelta(days=dias_delta) 
-    data_inicial_ajustada = data_meses_atras.replace(day=1) # Define o dia como 1
-    
-    data_inicial = data_inicial_ajustada.strftime("%d/%m/%Y") # Formata a data para o padrão dd/mm/aaaa
+    from dateutil.relativedelta import relativedelta
+    data_final = datetime.now()
+    data_inicial = (data_final - relativedelta(months=3)).replace(day=1)
+    # Garante que data_inicial < data_final
+    if data_inicial >= data_final:
+        # Ajusta para o primeiro dia do mês anterior
+        data_inicial = (data_final - relativedelta(months=1)).replace(day=1)
+    data_inicial_str = data_inicial.strftime("%d/%m/%Y")
     texto = "Painel de Produção Vivo"
 
-    selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial, 'producao.date_picker')
+    selecionar_data(driver, XPATHS['producao']['date_picker'], data_inicial_str, 'producao.date_picker')
     selecionar_texto(driver, XPATHS['producao']['combo_box'], texto, 'producao.combo_box')
     clicar_elemento(driver, XPATHS['producao']['radio_button'], 'producao.radio_button')
     clicar_elemento(driver, XPATHS['producao']['search_button'], 'producao.search_button')
@@ -822,9 +818,12 @@ def executar_rotina():
             resumo["status"] = "erro_exportacao"
         
         # Exportação Produção
-        data_90_dias_atras_producao = data_atual_dt - timedelta(days=92)
-        data_inicial_ajustada = data_90_dias_atras_producao.replace(day=1)
-        data_inicial_producao = data_inicial_ajustada.strftime("%d/%m/%Y")
+        from dateutil.relativedelta import relativedelta
+        data_final = data_atual_dt
+        data_inicial = (data_final - relativedelta(months=3)).replace(day=1)
+        if data_inicial >= data_final:
+            data_inicial = (data_final - relativedelta(months=1)).replace(day=1)
+        data_inicial_producao = data_inicial.strftime("%d/%m/%Y")
         resumo["producao"] = data_inicial_producao
         
         try:

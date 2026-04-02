@@ -12,6 +12,7 @@ pyinstaller --onefile --name robo_neo app.py
 REM 2. Copiar arquivos de configuração e drivers para a pasta dist
 copy /Y .env dist\
 copy /Y map.json dist\
+copy /Y map_relative.json dist\
 if exist geckodriver.exe copy /Y geckodriver.exe dist\
 if exist chromedriver.exe copy /Y chromedriver.exe dist\
 if exist msedgedriver.exe copy /Y msedgedriver.exe dist\
