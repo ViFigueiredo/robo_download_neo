@@ -149,6 +149,8 @@ load_dotenv('.env', override=True)
 # Timeouts configuráveis
 TIMEOUT_DOWNLOAD = int(os.getenv('TIMEOUT_DOWNLOAD', '60'))
 RETRIES_DOWNLOAD = int(os.getenv('RETRIES_DOWNLOAD', '3'))
+MOVE_RETRIES = int(os.getenv('MOVE_RETRIES', '10'))
+MOVE_RETRY_DELAY = float(os.getenv('MOVE_RETRY_DELAY', '5'))
 
 # Carrega os XPaths do arquivo map_relative.json (XPaths relativos mais robustos)
 with open('map_relative.json', 'r') as f:
@@ -670,53 +672,70 @@ def logout(driver):
     esperar_elemento(driver, XPATHS['logout']['logout_option'], 'logout.logout_option')
     clicar_elemento(driver, XPATHS['logout']['logout_option'], 'logout.logout_option')
 
+def _substituir_atomicamente(origem, destino, historico_path, arquivo):
+    """Copia para temp no MESMO volume do destino e faz replace atômico.
+    Retenta com backoff se o arquivo estiver em uso pelo PowerBI."""
+    import time as _time
+
+    tmp = f"{destino}.tmp_{os.getpid()}_{int(_time.time())}"
+    shutil.copy2(origem, tmp)
+
+    try:
+        for tentativa in range(1, MOVE_RETRIES + 1):
+            try:
+                if os.path.exists(destino):
+                    nome, ext = os.path.splitext(arquivo)
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    backup = os.path.join(historico_path, f"{nome}_BACKUP_{timestamp}{ext}")
+                    shutil.copy2(destino, backup)
+                    logger.info(f"[BACKUP] Criado: {os.path.basename(backup)}")
+
+                os.replace(tmp, destino)
+                os.remove(origem)
+                logger.info(f"[MOVIDO] {arquivo} -> destino")
+                return True
+
+            except PermissionError as e:
+                logger.warning(f"Arquivo em uso pelo PowerBI, retentando "
+                               f"({tentativa}/{MOVE_RETRIES})...")
+                if tentativa < MOVE_RETRIES:
+                    _time.sleep(MOVE_RETRY_DELAY * (1.5 ** (tentativa - 1)))
+                else:
+                    raise
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+    return False
+
 def mover_arquivos(diretorio_origem, arquivos, diretorio_destino, subdiretorio):
     logger.info("Iniciando movimentação segura de arquivos...")    
     os.makedirs(diretorio_destino, exist_ok=True) # Garantir estrutura de diretórios
     historico_path = os.path.join(diretorio_destino, subdiretorio)
     os.makedirs(historico_path, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     arquivos_movidos = 0
     arquivos_ignorados = 0
 
     for arquivo in arquivos:
+        orig_file = os.path.join(diretorio_origem, arquivo)
         dest_file = os.path.join(diretorio_destino, arquivo)
-        orig_file = os.path.join(diretorio_origem, arquivo)        
 
-        if os.path.exists(orig_file): # Verifica se o arquivo de origem existe
-            try:
-                if os.path.exists(dest_file): # Gerenciar conflitos no destino
-                    logger.warning(f"[CONFLITO] Arquivo ja existe: {arquivo}")
-                    try:
-                        nome, ext = os.path.splitext(arquivo) # Gerar novo nome único
-                        nome_salvo = f"{nome}_BACKUP_{timestamp}{ext}"
-                        shutil.move(dest_file, os.path.join(historico_path, nome_salvo)) # Mover arquivo conflitante para histórico
-                        logger.info(f"[BACKUP] Criado: {nome_salvo}")
-                    except PermissionError as e:
-                        logger.warning(f"⚠️ Não foi possível criar backup de {arquivo}: {e}")
-                        logger.warning(f"⚠️ Ignorando movimentação do arquivo: {arquivo}")
-                        arquivos_ignorados += 1
-                        continue
-                    except Exception as e:
-                        logger.warning(f"⚠️ Erro ao criar backup de {arquivo}: {e}")
-                        logger.warning(f"⚠️ Ignorando movimentação do arquivo: {arquivo}")
-                        arquivos_ignorados += 1
-                        continue
-
-                shutil.move(orig_file, dest_file) # Mover arquivo original para o destino
-                logger.info(f"[MOVIDO] {arquivo} -> destino")
-                arquivos_movidos += 1
-            except PermissionError as e:
-                logger.warning(f"⚠️ Arquivo em uso por outro processo: {arquivo}")
-                logger.warning(f"⚠️ Detalhes do erro: {e}")
-                logger.warning(f"⚠️ Ignorando movimentação do arquivo e continuando o fluxo...")
-                arquivos_ignorados += 1
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao mover arquivo {arquivo}: {e}")
-                logger.warning(f"⚠️ Ignorando movimentação do arquivo e continuando o fluxo...")
-                arquivos_ignorados += 1
-        else:
+        if not os.path.exists(orig_file):
             logger.warning(f"⚠️ Arquivo ausente: {orig_file}")
+            arquivos_ignorados += 1
+            continue
+
+        try:
+            _substituir_atomicamente(orig_file, dest_file, historico_path, arquivo)
+            arquivos_movidos += 1
+        except PermissionError:
+            logger.warning(f"⚠️ Arquivo em uso pelo PowerBI após {MOVE_RETRIES} tentativas: {arquivo}")
+            arquivos_ignorados += 1
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao mover arquivo {arquivo}: {e}")
             arquivos_ignorados += 1
     
     logger.info(f"Operação concluída: {arquivos_movidos} arquivo(s) movido(s), {arquivos_ignorados} arquivo(s) ignorado(s)\n")
@@ -775,13 +794,13 @@ def executar_rotina():
             if any(palavra in f.lower() for palavra in palavras_chave):
                 file_path = os.path.join(user_download_dir, f)
                 if os.path.isfile(file_path):
-                    try:
-                        os.remove(file_path)
-                        logger.info(f"Arquivo antigo removido: {f}")
-                    except PermissionError as e:
-                        logger.warning(f"Arquivo em uso (PermissionError): {f}")
-                    except Exception as e:
-                        logger.warning(f"Erro ao remover arquivo: {f} - {e}")
+                    idade = time.time() - os.path.getmtime(file_path)
+                    if idade > 86400:  # só apaga arquivos com mais de 1 dia
+                        try:
+                            os.remove(file_path)
+                            logger.info(f"Arquivo antigo removido: {f}")
+                        except (PermissionError, OSError) as e:
+                            logger.warning(f"Erro ao remover arquivo: {f} - {e}")
         
         driver = iniciar_driver()
         login(driver)
